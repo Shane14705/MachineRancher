@@ -51,6 +51,8 @@ namespace MachineRancher
             throw new NotImplementedException(); 
         }
 
+        //TODO: When we discover a new printer, we need to check all of its attributes to subscribe it to specific values
+
         public async Task Monitor()
         {
             var mqttFactory = new MQTTnet.MqttFactory();
