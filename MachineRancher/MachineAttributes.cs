@@ -2,11 +2,31 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace MachineRancher
 {
+    [AttributeUsage(AttributeTargets.Class, Inherited =false)]
+    public class DiscoveryTopicAttribute : Attribute
+    {
+        public string path;
+        static int count = 0;
+
+        /// <summary>
+        /// Tells the rancher what MQTT path to watch for new devices of this type.
+        /// Hint: Path should be topics at the root level, with individual machines being published as direct subtopics to this root topic.
+        /// I.E: Devices/, Printers/, etc. Racher will then look for things like Devices/Device1, Printers/Printer2, etc.
+        /// </summary>
+        /// <param name="path">MQTT Path to watch</param>
+        public DiscoveryTopicAttribute(string path)
+        {
+            this.path = path;
+        }
+
+    }
+
     [AttributeUsage(AttributeTargets.Property)]
     public class MonitorRegistrationAttribute : Attribute
     {
@@ -17,8 +37,9 @@ namespace MachineRancher
         /// Registers a property to be updated via MQTT. (The type, ie: whether or not we are dealing with an array, is found by the property's type.
         /// </summary>
         /// <param name="topic">The topic this property is to be set using. Use a '*' in places where the machine's name would be.</param>
+        /// <param name="dict_key">If the mqtt topic gives a JSON object, this is the key we will use to grab the value. Defaults to "value".</param>
         /// <param name="samples_to_average">The number of samples to buffer and average before updating the property. Defaults to no buffering.</param>
-        public MonitorRegistrationAttribute(string topic, int samples_to_average=1)
+        public MonitorRegistrationAttribute(string topic, string dict_key="value", int samples_to_average=1)
         {
             this.topic = topic;
             this.samples_to_average = samples_to_average;
@@ -38,11 +59,9 @@ namespace MachineRancher
     /// Beyond this, you can add any fields you would like to the section, and your plugin will be provided with access to this section.
     /// </summary>
     internal abstract class Machine
-    {
-        //The topic for which the application should look for new devices to be published under
-        static public string DiscoveryTopic { get; set; }
-        
-        public abstract string Name { get; }  
+    {   
+        public abstract string Name { get; set; }  
         public abstract string Description { get; }
+        public abstract string Websocket { get; set; }
     }
 }
