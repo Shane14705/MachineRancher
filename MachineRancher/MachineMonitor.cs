@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.PortableExecutable;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -192,8 +193,30 @@ namespace MachineRancher
                         logger.LogInformation(str);
 
                         Dictionary<string, object> dict = JsonSerializer.Deserialize<Dictionary<string, object>>(str);
-                        //logger.LogInformation("Test: " + dict[target.Item3.json_key].ToString());
-                        target.Item2.SetValue(target.Item1, dict[target.Item3.json_key].ToString());
+                        if (target.Item2.PropertyType == typeof(float))
+                        {
+                            float temp;
+                            float.TryParse(dict[target.Item3.json_key].ToString(), out temp);
+                            target.Item2.SetValue(target.Item1, temp);
+                        }
+
+                        else if (target.Item2.PropertyType == typeof(int))
+                        {
+                            int temp;
+                            int.TryParse(dict[target.Item3.json_key].ToString(), out temp);
+                            target.Item2.SetValue(target.Item1, temp);
+                        }
+
+                        else if (target.Item2.PropertyType == typeof(string))
+                        {
+                            target.Item2.SetValue(target.Item1, str);
+                        }
+
+                        else
+                        {
+                            logger.LogCritical("Machine " + target.Item1.Name + ": Parameter " + target.Item2.Name + "is not of a supported type! It is " + target.Item2.PropertyType.FullName + ", and supported types are float, int, and string.");
+                        }
+
                     }
                     else
                     {
@@ -215,7 +238,8 @@ namespace MachineRancher
                     await managedMqttClient.SubscribeAsync(topic);
                     
                 }
-                
+                //REMINDER: NEED TO ADJUST WEBSOCKET TOPIC TO BE JSON AND STRING OF "IP:PORT", ALSO NEED TO MAKE ALL OTHER TOPICS BE JSON AS WELL (LIKE NOZZLE SIZE)
+                //TODO: TOMORROW, WE IMPLEMENT FUNCTIONS (ie: printer leveling)
                 while (true) await Task.Delay(1000);
 
             }

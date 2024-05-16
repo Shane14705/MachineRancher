@@ -36,6 +36,7 @@ namespace MachineRancher
         public string json_key;
 
         /// <summary>
+        /// ONLY SUPPORTS FLOATS, STRINGS, INTS
         /// Registers a property to be updated via MQTT. (The type, ie: whether or not we are dealing with an array, is found by the property's type.
         /// </summary>
         /// <param name="topic">The topic this property is to be set using. Use a '*' in places where the machine's name would be.</param>
