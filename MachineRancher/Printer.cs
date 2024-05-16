@@ -31,9 +31,14 @@ namespace MachineRancher
         private float fan_speed;
 
         [MonitorRegistration("Printers/*/moonraker/status/connections", "websocket")]
-        public override string Websocket { get => websocket; set => websocket = value; }
+        public (string, int) Websocket { get => websocket; set => websocket = value; }
 
-        private string websocket;
+        private (string, int) websocket;
+
+        //[MonitorRegistration("Printers/*/moonraker/state/nozzle_size")]
+        //public float Nozzle_Size { get => nozzle_size; set => nozzle_size = value; } //Note: we can do averaging here, or do it in the mqtt monitor. Probably more efficient to do in the monitor
+
+        //private float nozzle_size;
 
         public Printer()
         {

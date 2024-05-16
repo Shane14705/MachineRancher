@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml.XPath;
@@ -168,9 +169,8 @@ namespace MachineRancher
                 }
             }
 
-            logger.LogInformation(monitored_properties.Keys.Count.ToString());
+            logger.LogInformation("Found " + monitored_properties.Keys.Count.ToString() + " properties and linked them to MQTT Topics. Setting up callbacks now!");
 
-            /*
             var mqttFactory = new MQTTnet.MqttFactory();
 
             using (var managedMqttClient = mqttFactory.CreateManagedMqttClient())
@@ -182,28 +182,44 @@ namespace MachineRancher
                 var managedMqttClientOptions = new ManagedMqttClientOptionsBuilder()
                     .WithClientOptions(mqttClientOptions)
                     .Build();
-
+                
                 managedMqttClient.ApplicationMessageReceivedAsync += e =>
                 {
-                    logger.LogInformation("Received application message.");
-                    logger.LogInformation("Topic: " + e.ApplicationMessage.Topic);
-                    logger.LogInformation("Payload: " + e.ApplicationMessage.ConvertPayloadToString());
+                    if (monitored_properties.ContainsKey(e.ApplicationMessage.Topic))
+                    {
+                        var target = monitored_properties[e.ApplicationMessage.Topic];
+                        var str = e.ApplicationMessage.ConvertPayloadToString();
+                        logger.LogInformation(str);
+
+                        Dictionary<string, object> dict = JsonSerializer.Deserialize<Dictionary<string, object>>(str);
+                        //logger.LogInformation("Test: " + dict[target.Item3.json_key].ToString());
+                        target.Item2.SetValue(target.Item1, dict[target.Item3.json_key].ToString());
+                    }
+                    else
+                    {
+                        logger.LogWarning("Received a message for a topic we shouldn't be subscribed to: \nTopic: " + e.ApplicationMessage.Topic + "\nPayload: " + e.ApplicationMessage.ConvertPayloadToString());
+                    }
+                    //logger.LogInformation("Received application message.");
+                    //logger.LogInformation("Topic: " + e.ApplicationMessage.Topic);
+                    //logger.LogInformation("Payload: " + e.ApplicationMessage.ConvertPayloadToString());
+
+
                     return Task.CompletedTask;
                 };
 
                 await managedMqttClient.StartAsync(managedMqttClientOptions);
-                foreach (string path in this.machine_plugins.Keys)
+                foreach (string topic in monitored_properties.Keys)
                 {
-                    logger.LogInformation("Subscribing to: " + path);
+                    logger.LogInformation("Subscribing to: " + topic);
 
-                    await managedMqttClient.SubscribeAsync(path);
+                    await managedMqttClient.SubscribeAsync(topic);
                     
                 }
                 
-                while (true) await Task.Delay(100);
+                while (true) await Task.Delay(1000);
 
             }
-            */
+            
         }
     }
 }

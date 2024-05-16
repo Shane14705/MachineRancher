@@ -32,6 +32,8 @@ namespace MachineRancher
     {
         public string topic;
         public int samples_to_average;
+        public bool is_json;
+        public string json_key;
 
         /// <summary>
         /// Registers a property to be updated via MQTT. (The type, ie: whether or not we are dealing with an array, is found by the property's type.
@@ -39,11 +41,14 @@ namespace MachineRancher
         /// <param name="topic">The topic this property is to be set using. Use a '*' in places where the machine's name would be.</param>
         /// <param name="dict_key">If the mqtt topic gives a JSON object, this is the key we will use to grab the value. Defaults to "value".</param>
         /// <param name="samples_to_average">The number of samples to buffer and average before updating the property. Defaults to no buffering.</param>
-        public MonitorRegistrationAttribute(string topic, string dict_key="value", int samples_to_average=1)
+        public MonitorRegistrationAttribute(string topic, string dict_key, int samples_to_average=1)
         {
+            this.is_json = true;
             this.topic = topic;
+            this.json_key = dict_key;
             this.samples_to_average = samples_to_average;
         }
+
     }
 
     [AttributeUsage(AttributeTargets.Method)]
@@ -62,6 +67,6 @@ namespace MachineRancher
     {   
         public abstract string Name { get; set; }  
         public abstract string Description { get; }
-        public abstract string Websocket { get; set; }
+        //public abstract string Websocket { get; set; }
     }
 }
