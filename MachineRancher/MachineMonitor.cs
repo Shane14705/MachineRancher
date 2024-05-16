@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -148,6 +149,27 @@ namespace MachineRancher
         {
             this.machines = await DiscoverMachines();
             logger.LogInformation(this.machines.Count.ToString());
+
+            Dictionary<string, (Machine, PropertyInfo, MonitorRegistrationAttribute)> monitored_properties = new Dictionary<string, (Machine, PropertyInfo, MonitorRegistrationAttribute)> ();
+
+            foreach (Machine machine in this.machines)
+            {
+                foreach (var property in machine.GetType().GetProperties())
+                {
+                    MonitorRegistrationAttribute[] topics = (MonitorRegistrationAttribute[]) property.GetCustomAttributes(typeof(MonitorRegistrationAttribute), false);
+                    if (topics.Length != 1)
+                    {
+                        logger.LogWarning("Machine " + machine.Name + ": Parameter " + property.Name + " does not have exactly one MQTT path to link with, and will be ignored.");
+                        continue;
+                    }
+                    topics[0].topic = topics[0].topic.Replace("*", machine.Name);
+                    
+                    monitored_properties.Add(topics[0].topic, (machine, property, topics[0]));
+                }
+            }
+
+            logger.LogInformation(monitored_properties.Keys.Count.ToString());
+
             /*
             var mqttFactory = new MQTTnet.MqttFactory();
 
