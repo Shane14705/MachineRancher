@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using WatsonWebsocket;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Text.Json;
 
 namespace MachineRancher
 {
@@ -46,9 +48,9 @@ namespace MachineRancher
             }
         }
 
-        private string websocket_addr;
+        private string websocket_addr = string.Empty;
 
-        private int websocket_port;
+        private int websocket_port = -1;
 
         //[MonitorRegistration("Printers/*/moonraker/state/nozzle_size")]
         //public float Nozzle_Size { get => nozzle_size; set => nozzle_size = value; } //Note: we can do averaging here, or do it in the mqtt monitor. Probably more efficient to do in the monitor
@@ -59,6 +61,130 @@ namespace MachineRancher
         {
         }
 
+
+        /*
+         * async def send_command(self, cmd):
+        async with websockets.connect(self.printer_addr) as websocket:
+            await websocket.send("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.gcode.script\",\"params\": { \"script\": \"" + cmd + "\"}, \"id\": " + str(random.Random().randint(0, 9999)) + "}")
+            #Call the above with BED_SCREWS_ADJUST and wait to receive response we can parse...
+        */
+        public async Task Send_Command(string command)
+        {
+            throw new NotImplementedException();
+        }
+
+        public async Task Send_Command(WatsonWsClient wsclient, string command)
+        {
+            Random rand = new Random();
+            await wsclient.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.gcode.script\",\"params\": { \"script\": \"" + command + "\"}, \"id\": " + rand.Next(0, 9999).ToString() + "}");
+        }
+
+        /// <summary>
+        /// Helper function to turn the strings gathered from the bed leveling command into values by which screws can be adjusted.
+        /// </summary>
+        /// <param name="adjustment"></param>
+        /// <returns>Float representing the number of rotations to be done to the given screw. Negative values represent counter-clockwise rotation, and positive represents clockwise.</returns>
+        private float string_to_rotations(string adjustment)
+        {
+            string[] values = adjustment.Split(':');
+            if (values.Length != 2) 
+            {
+                Console.WriteLine("error: unexpected adj string: " + adjustment);
+                return 0;
+            }
+
+            float output = 0;
+
+            output += float.Parse(values[0]);
+
+            output += (float.Parse(values[1]) / 60);
+
+            if (adjustment.Contains("CCW"))
+            {
+                output *= -1;
+            }
+
+            return output;
+            
+        }
+
+        public async Task<Dictionary<string, float>?> LevelBed()
+        {
+            if (string.IsNullOrWhiteSpace(websocket_addr) || websocket_port < 0)
+            {
+                Console.WriteLine("No websocket available!");
+                return null;
+            }
+
+            WatsonWsClient client = new WatsonWsClient(websocket_addr, websocket_port);
+            client.StartWithTimeoutAsync(10).Wait();
+            Console.WriteLine("Connected to " + this.name + "!");
+
+            await Send_Command(client, "G28");
+            await Send_Command(client, "SCREWS_TILT_CALCULATE");
+            Dictionary<string, float> leveling_info = new Dictionary<string, float>();
+
+            client.MessageReceived += (sender, message) =>
+                {
+                    if (message.Data != null && message.Data.Count > 0)
+                    {
+                        string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
+                        if (msg.Contains("screw")) //TODO: Eventually, make this work for non-standard screw names? https://www.klipper3d.org/Manual_Level.html#adjusting-bed-leveling-screws-using-the-bed-probe
+                        {
+                            if (msg.Contains("front left"))
+                            {
+                                leveling_info["front left"] = 0f;
+                                return;
+                            }
+                            if (msg.Contains("front right"))
+                            {
+                                string val = msg.Substring(msg.LastIndexOf(" : ") + 2).Trim();
+                                leveling_info["front right"] = string_to_rotations(val);
+                                return;
+                            }
+                            if (msg.Contains("rear right"))
+                            {
+                                string val = msg.Substring(msg.LastIndexOf(" : ") + 2).Trim();
+                                leveling_info["rear right"] = string_to_rotations(val);
+                                return;
+                            }
+                            if (msg.Contains("rear left"))
+                            {
+                                string val = msg.Substring(msg.LastIndexOf(" : ") + 2).Trim();
+                                leveling_info["rear left"] = string_to_rotations(val);
+                                return;
+                            }
+                            Console.WriteLine(msg);
+                        }
+                    }
+                };
+
+
+            //TODO: Figure out config file so we can make these delays customizable
+            var tokenSource = new CancellationTokenSource();
+            var token = tokenSource.Token;
+            var waitTask = Task.Run((async () =>
+            {
+                while (leveling_info.Count != 4)
+                {
+                    token.ThrowIfCancellationRequested();
+                    await Task.Delay(5000);
+                }
+            }), tokenSource.Token);
+
+            if (waitTask != await Task.WhenAny(waitTask, Task.Delay(30000)))
+            {
+                tokenSource.Cancel();
+                Console.WriteLine("Bed leveling timed out!");
+            }
+
+            await client.StopAsync();
+
+            return leveling_info;
+ 
+        }
         
     }
+
+
 }
