@@ -61,7 +61,7 @@ namespace MachineRancher
 
     /// <summary>
     /// Any machine plugins must inherit from this class to be detected. Additionally, each plugin must have a config section in appsettings.ini with the same name as the class.
-    /// This config must define a "DiscoveryTopic" field, which is the MQTT topic which the monitor will subscribe to in order to detect new instances of this given machine.
+    /// Classes that inherit from this must have a "DiscoveryTopic" attribute to be detected as well.
     /// Beyond this, you can add any fields you would like to the section, and your plugin will be provided with access to this section.
     /// </summary>
     internal abstract class Machine

@@ -6,7 +6,17 @@ using System.Threading.Tasks;
 
 namespace MachineRancher
 {
-    internal class HolographicClient
+    [ClientTypeDescriptor("HolographicInterface")]
+    internal class HolographicClient : Interface
     {
+        public override string Name { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+
+        public override string Description => throw new NotImplementedException();
+
+        public override string Websocket { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+
+        public HolographicClient() { }
+
+
     }
 }

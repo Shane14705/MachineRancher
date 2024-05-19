@@ -14,6 +14,8 @@ using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Extensions.ManagedClient;
+using MQTTnet.Internal;
+using WatsonWebsocket;
 
 namespace MachineRancher
 {
@@ -25,16 +27,22 @@ namespace MachineRancher
         private string server_password;
         
         public Dictionary<string, Type> machine_plugins;
+        public Dictionary<string, Type> interface_plugins;
 
         private List<Machine> machines;
+        private List<Interface> clients;
+        private int max_clients;
 
+        private WatsonWsServer listen_server;
         private readonly IConfiguration configuration;
         private readonly ILogger logger;
 
         public MachineMonitor(ILogger<MachineMonitor> logger, IHostApplicationLifetime appLifetime, IConfiguration configuration)
         {
             this.machine_plugins = new Dictionary<string, Type>();
+            this.interface_plugins = new Dictionary<string, Type>();
             this.machines = new List<Machine>();
+            this.clients = new List<Interface>();
             //var configuration = new ConfigurationBuilder()
             //    .AddIniFile("appsettings.ini", optional: false, reloadOnChange: false)
             //    .Build();
@@ -48,8 +56,20 @@ namespace MachineRancher
             }
             this.server_username = mqttsection["MQTTUsername"];
             this.server_password = mqttsection["MQTTPassword"];
-            this.configuration = configuration;
 
+            var listen_section = this.configuration.GetSection("ListenServer");
+            int listen_port;
+            if (!Int32.TryParse(listen_section["ListenServerPort"], out listen_port))
+            {
+                this.logger.LogCritical("ERROR: Could not parse ListenServerPort from appsettings.ini");
+            }
+
+            if (!Int32.TryParse(listen_section["MaxClients"], out this.max_clients))
+            {
+                this.logger.LogCritical("ERROR: Could not parse MaxClients from appsettings.ini");
+            }
+
+            //Detect Machine Plugins
             var plugins = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(assembly => assembly.GetTypes())
                 .Where(type => type.IsSubclassOf(typeof(Machine)))
@@ -61,21 +81,71 @@ namespace MachineRancher
                 //    .SelectMany(assembly => assembly.GetTypes())
                 //    .First(t => t.Name == plugin.FullName);
                 machine_plugins.Add(disc_topic[0].path, plugin);
-                this.logger.LogCritical(plugin.FullName);
+                //this.logger.LogCritical(plugin.FullName);
+
+            }
+
+            //Detect Interface Plugins
+            plugins = AppDomain.CurrentDomain.GetAssemblies()
+                .SelectMany(assembly => assembly.GetTypes())
+                .Where(type => type.IsSubclassOf(typeof(Interface)))
+                .ToList();
+            foreach (var plugin in plugins)
+            {
+                ClientTypeDescriptorAttribute[] desc_type = (MachineRancher.ClientTypeDescriptorAttribute[])plugin.GetCustomAttributes(typeof(ClientTypeDescriptorAttribute), true);
+                //Type plugin_type = AppDomain.CurrentDomain.GetAssemblies()
+                //    .SelectMany(assembly => assembly.GetTypes())
+                //    .First(t => t.Name == plugin.FullName);
+                interface_plugins.Add(desc_type[0].value, plugin);
+                //this.logger.LogCritical(plugin.FullName);
 
             }
             //.Select(type => Activator.CreateInstance(type) as Machine)
             //this.machine_plugins.Keys.ForEach(x => Console.WriteLine(x.Name));
+
+
+            
+            List<string> endpoints = new List<string>();
+
+            foreach (var interface_type in interface_plugins)
+            {
+                endpoints.Add("http://" + listen_section["ListenServerIP"] + ":" + listen_port + "/" + interface_type.Key + "/");
+            }
+            ;
+            this.listen_server = new WatsonWsServer(endpoints);
+
+            this.listen_server.ClientConnected += OnClientConnect;
+
         }
-        
+
+        private void OnClientConnect(object? sender, ConnectionEventArgs e)
+        {
+            if (this.listen_server.ListClients().Count() > this.max_clients)
+            {
+                logger.LogWarning("Refusing a new connection as we are already above the maximum amount of allowed clients. You can change this in appsettings.ini.");
+                this.listen_server.DisconnectClient(e.Client.Guid);
+                return;
+            }
+
+            //TODO: Figure out how to tell which endpoint was used, and create the correct corresponding instance
+            logger.LogInformation("connection received at: " + e.HttpRequest.Url.ToString());
+
+        }
+
         public Task StartAsync(CancellationToken cancellationToken)
         {
-            return Task.Run(Monitor);
+            return Task.Run(main);
         }
 
         public Task StopAsync(CancellationToken cancellationToken) 
         {
             throw new NotImplementedException(); 
+        }
+
+        public async Task main()
+        {
+            await listen_server.StartAsync();
+            await Monitor();
         }
 
         //TODO: When we discover a new printer, we need to check all of its attributes to subscribe it to specific values
