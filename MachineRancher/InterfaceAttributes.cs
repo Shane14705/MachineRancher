@@ -26,7 +26,7 @@ namespace MachineRancher
 
     }
 
-    public delegate Task<bool> SendClient(ArraySegment<Byte> message);
+    public delegate Task<bool> SendClient(string message);
     /// <summary>
     /// Any interface plugins must inherit from this class to be detected. Additionally, each plugin must have a config section in appsettings.ini with the same name as the class.
     /// Classes that inherit from this must have a "ClientTypeDescriptor" attribute to be detected as well.
@@ -37,12 +37,35 @@ namespace MachineRancher
         public abstract string Name { get; set; }
         public abstract string Description { get; }
         public abstract Guid Websocket_ID { get; set; }
-        
+
         public abstract SendClient SendClient { get; set; }
-        public abstract Channel<ArraySegment<Byte>> To_Interface { get; }
+        public abstract Channel<string> To_Interface { get; }
 
-        public abstract Channel<ArraySegment<Byte>> To_Rancher { get; }
+        public abstract Channel<string> To_Rancher { get; }
 
-        public abstract Task Main();
+        protected CancellationTokenSource CancellationTokenSource = new CancellationTokenSource();
+        public CancellationToken main_token;
+
+        protected abstract Task MainLoop(CancellationToken token);
+        public Interface()
+        {
+            this.main_token = this.CancellationTokenSource.Token;
+        }
+
+        public void StartAsync()
+        {
+            Task.Run(() => this.MainLoop(this.main_token));
+        }
+
+        /// <summary>
+        /// Requests a cancellation of all async operations in the current instance (including the Main loop). Can be extended to perform other cleanup on a per plugin basis.
+        /// </summary>
+        public void Kill()
+        {
+            if (CancellationTokenSource != null)
+            {
+                CancellationTokenSource.Cancel();
+            }
+        }
     }
 }

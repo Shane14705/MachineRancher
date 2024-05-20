@@ -17,28 +17,29 @@ namespace MachineRancher
 
         public override Guid Websocket_ID { get => websocket_id; set => websocket_id = value; }
 
-        public override Channel<ArraySegment<Byte>> To_Interface => to_self;
+        public override Channel<string> To_Interface => to_self;
 
-        public override Channel<ArraySegment<Byte>> To_Rancher => to_server;
+        public override Channel<string> To_Rancher => to_server;
 
         public override SendClient SendClient { get => send_client; set => send_client = value; }
-
+        
         private SendClient send_client;
         private Guid websocket_id;
+        private CancellationTokenSource cancellationTokenSource;
 
-        private Channel<ArraySegment<Byte>> to_self = Channel.CreateUnbounded<ArraySegment<Byte>>();
-        private Channel<ArraySegment<Byte>> to_server = Channel.CreateUnbounded<ArraySegment<Byte>>();
+        private Channel<string> to_self = Channel.CreateUnbounded<string>();
+        private Channel<string> to_server = Channel.CreateUnbounded<string>();
 
-        public HolographicClient()
+        public HolographicClient() : base()
         {
-
+            
         }
 
-        public override async Task Main()
+        protected override async Task MainLoop(CancellationToken token)
         {
-            while (true)
+            while (!token.IsCancellationRequested)
             {
-                await foreach (ArraySegment<Byte> incoming_msg in to_self.Reader.ReadAllAsync())
+                await foreach (string incoming_msg in to_self.Reader.ReadAllAsync(token))
                 {
                     await send_client(incoming_msg);
                 }

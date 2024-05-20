@@ -124,7 +124,7 @@ namespace MachineRancher
             Interface target_client;
             if (this.clients.TryGetValue(e.Client.Guid, out target_client))
             {
-                await target_client.To_Interface.Writer.WriteAsync(e.Data);
+                await target_client.To_Interface.Writer.WriteAsync(Encoding.UTF8.GetString(e.Data));
             }
             else
             {
@@ -155,9 +155,9 @@ namespace MachineRancher
                     {
                         return await this.listen_server.SendAsync(e.Client.Guid, msg);
                     };
-                    Task.Run(new_client.Main);
+                    Task.Run(new_client.StartAsync);
                     return;
-                    //await new_client.SendClient(Encoding.UTF8.GetBytes("TEST"));
+
                 }
             }
             this.logger.LogError("Client connected at an endpoint: " + e.HttpRequest.Url.ToString() + " with no client type associated with it!");
