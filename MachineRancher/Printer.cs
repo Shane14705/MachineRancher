@@ -108,6 +108,12 @@ namespace MachineRancher
             
         }
 
+        //TODO: Implement this, which also requires implementing the digital twin of the printer and checks against nozzle type etc
+        public async Task<List<string>> RetrievePrintables()
+        {
+            throw new NotImplementedException ();
+        }
+
         public async Task<Dictionary<string, float>?> LevelBed()
         {
             if (string.IsNullOrWhiteSpace(websocket_addr) || websocket_port < 0)

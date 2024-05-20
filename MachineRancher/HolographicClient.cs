@@ -35,12 +35,20 @@ namespace MachineRancher
             
         }
 
+        /*Plan: Maintain a list of the most recent "x" number of qr codes (machines) discovered and send information required for status overlays
+         *  - Hololens will send message everytime a new qr code is discovered
+         *  - When logged into a specific printer, create a new "state" for that machine providing whatever a first task is (for now, we will focus on printer only)
+         *      - Maintain state, so when we switch between printers we can resume where we were
+         *
+         * 
+         */
         protected override async Task MainLoop(CancellationToken token)
         {
             while (!token.IsCancellationRequested)
             {
                 await foreach (string incoming_msg in to_self.Reader.ReadAllAsync(token))
                 {
+
                     await send_client(incoming_msg);
                 }
             }
