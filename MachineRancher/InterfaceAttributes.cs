@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading.Channels;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -24,6 +26,7 @@ namespace MachineRancher
 
     }
 
+    public delegate Task<bool> SendClient(ArraySegment<Byte> message);
     /// <summary>
     /// Any interface plugins must inherit from this class to be detected. Additionally, each plugin must have a config section in appsettings.ini with the same name as the class.
     /// Classes that inherit from this must have a "ClientTypeDescriptor" attribute to be detected as well.
@@ -33,6 +36,13 @@ namespace MachineRancher
     {
         public abstract string Name { get; set; }
         public abstract string Description { get; }
-        public abstract string Websocket { get; set; }
+        public abstract Guid Websocket_ID { get; set; }
+        
+        public abstract SendClient SendClient { get; set; }
+        public abstract Channel<ArraySegment<Byte>> To_Interface { get; }
+
+        public abstract Channel<ArraySegment<Byte>> To_Rancher { get; }
+
+        public abstract Task Main();
     }
 }

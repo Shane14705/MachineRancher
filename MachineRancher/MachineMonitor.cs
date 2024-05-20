@@ -30,7 +30,7 @@ namespace MachineRancher
         public Dictionary<string, Type> interface_plugins;
 
         private List<Machine> machines;
-        private List<Interface> clients;
+        private Dictionary<Guid, Interface> clients;
         private int max_clients;
 
         private WatsonWsServer listen_server;
@@ -42,7 +42,7 @@ namespace MachineRancher
             this.machine_plugins = new Dictionary<string, Type>();
             this.interface_plugins = new Dictionary<string, Type>();
             this.machines = new List<Machine>();
-            this.clients = new List<Interface>();
+            this.clients = new Dictionary<Guid, Interface>();
             //var configuration = new ConfigurationBuilder()
             //    .AddIniFile("appsettings.ini", optional: false, reloadOnChange: false)
             //    .Build();
@@ -115,10 +115,25 @@ namespace MachineRancher
             this.listen_server = new WatsonWsServer(endpoints);
 
             this.listen_server.ClientConnected += OnClientConnect;
+            this.listen_server.MessageReceived += OnMessageReceived;
 
         }
 
-        private void OnClientConnect(object? sender, ConnectionEventArgs e)
+        private async void OnMessageReceived(object? sender, MessageReceivedEventArgs e)
+        {
+            Interface target_client;
+            if (this.clients.TryGetValue(e.Client.Guid, out target_client))
+            {
+                await target_client.To_Interface.Writer.WriteAsync(e.Data);
+            }
+            else
+            {
+                this.logger.LogError("Received websocket message from a Guid which has no client associated with it!");
+            }
+        }
+
+
+        private async void OnClientConnect(object? sender, ConnectionEventArgs e)
         {
             if (this.listen_server.ListClients().Count() > this.max_clients)
             {
@@ -127,9 +142,25 @@ namespace MachineRancher
                 return;
             }
 
-            //TODO: Figure out how to tell which endpoint was used, and create the correct corresponding instance
-            logger.LogInformation("connection received at: " + e.HttpRequest.Url.ToString());
-
+            //Remark: Will only match the first "endpoint" to use a name, so be careful not to have overlapping endpoint names
+            foreach (var client_type in this.interface_plugins)
+            {
+                if (e.HttpRequest.Url.ToString().EndsWith(client_type.Key + "/"))
+                {
+                    logger.LogInformation("Accepting an incoming connection of type \"" + client_type.Key + "\"");
+                    Interface new_client = (Interface)Activator.CreateInstance(Type.GetType(client_type.Value.FullName));
+                    this.clients.Add(e.Client.Guid, new_client);
+                    new_client.Websocket_ID = e.Client.Guid;
+                    new_client.SendClient = async (msg) =>
+                    {
+                        return await this.listen_server.SendAsync(e.Client.Guid, msg);
+                    };
+                    Task.Run(new_client.Main);
+                    return;
+                    //await new_client.SendClient(Encoding.UTF8.GetBytes("TEST"));
+                }
+            }
+            this.logger.LogError("Client connected at an endpoint: " + e.HttpRequest.Url.ToString() + " with no client type associated with it!");
         }
 
         public Task StartAsync(CancellationToken cancellationToken)
