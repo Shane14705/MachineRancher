@@ -5,6 +5,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Text.Json;
+using System.Net;
+using System.Text.RegularExpressions;
 
 namespace MachineRancher
 {
@@ -57,7 +59,7 @@ namespace MachineRancher
 
         //private float nozzle_size;
 
-        public Printer()
+        public Printer(string name) : base(name)
         {
         }
 
@@ -111,7 +113,46 @@ namespace MachineRancher
         //TODO: Implement this, which also requires implementing the digital twin of the printer and checks against nozzle type etc
         public async Task<List<string>> RetrievePrintables()
         {
-            throw new NotImplementedException ();
+            Regex regex = new Regex("\"path\": \"([^\"]+)");
+            bool response_received = false;
+            List<string> ret = new List<string>();
+            WatsonWsClient client = new WatsonWsClient(websocket_addr, websocket_port);
+            Random rand = new Random();
+            int request_id = rand.Next(0, 9999);
+            client.MessageReceived += (sender, message) =>
+            {
+                string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
+                if (msg.Contains("\"id\": " + request_id.ToString()))
+                {
+                    foreach (Match match in regex.Matches(msg))
+                    {
+                        ret.Add(match.Groups[0].Value);
+                    }
+                    response_received = true;
+                }
+            };
+            await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"server.files.list\",\"params\": { \"root\": \"" + "gcodes" + "\"}, \"id\": " + request_id.ToString() + "}");
+
+            //TODO: Figure out config file so we can make these delays customizable
+            var tokenSource = new CancellationTokenSource();
+            var token = tokenSource.Token;
+            var waitTask = Task.Run((async () =>
+            {
+                while (!response_received)
+                {
+                    token.ThrowIfCancellationRequested();
+                    await Task.Delay(50, token);
+                }
+            }), tokenSource.Token);
+
+            if (waitTask != await Task.WhenAny(waitTask, Task.Delay(10000)))
+            {
+                tokenSource.Cancel();
+                Console.WriteLine("Printable file list retrieval timed out!");
+            }
+
+            return ret;
+
         }
 
         public async Task<Dictionary<string, float>?> LevelBed()
@@ -174,7 +215,7 @@ namespace MachineRancher
                 while (leveling_info.Count != 4)
                 {
                     token.ThrowIfCancellationRequested();
-                    await Task.Delay(5000);
+                    await Task.Delay(5000, token);
                 }
             }), tokenSource.Token);
 

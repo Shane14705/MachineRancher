@@ -148,13 +148,19 @@ namespace MachineRancher
                 if (e.HttpRequest.Url.ToString().EndsWith(client_type.Key + "/"))
                 {
                     logger.LogInformation("Accepting an incoming connection of type \"" + client_type.Key + "\"");
-                    Interface new_client = (Interface)Activator.CreateInstance(Type.GetType(client_type.Value.FullName));
+                    Object[] temp = [e.Client.Guid, (SendClient) (async (msg) =>
+                    {
+                        return await this.listen_server.SendAsync(e.Client.Guid, msg);
+                    })];
+                    Interface new_client = (Interface)Activator.CreateInstance(Type.GetType(client_type.Value.FullName), temp);
                     this.clients.Add(e.Client.Guid, new_client);
+                    /*
                     new_client.Websocket_ID = e.Client.Guid;
                     new_client.SendClient = async (msg) =>
                     {
                         return await this.listen_server.SendAsync(e.Client.Guid, msg);
                     };
+                    */
                     Task.Run(new_client.StartAsync);
                     return;
 
@@ -237,9 +243,9 @@ namespace MachineRancher
             {
                 if (machine_plugins.Keys.Contains(pair.Item1))
                 {
-                    Machine new_machine = (Machine)Activator.CreateInstance(Type.GetType(machine_plugins[pair.Item1].FullName));
+                    Machine new_machine = (Machine)Activator.CreateInstance(Type.GetType(machine_plugins[pair.Item1].FullName), [pair.Item2]);
                     machines.Add(new_machine);
-                    new_machine.Name = pair.Item2;
+                    //new_machine.Name = pair.Item2;
                 }
             }
             logger.LogInformation(String.Join(", ", machineNames));

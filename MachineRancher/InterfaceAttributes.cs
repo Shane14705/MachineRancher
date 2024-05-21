@@ -47,9 +47,11 @@ namespace MachineRancher
         public CancellationToken main_token;
 
         protected abstract Task MainLoop(CancellationToken token);
-        public Interface()
+        public Interface(Guid websocket_id, SendClient send_func)
         {
+            this.Websocket_ID = websocket_id;
             this.main_token = this.CancellationTokenSource.Token;
+            this.SendClient = send_func;
         }
 
         public void StartAsync()

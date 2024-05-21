@@ -69,5 +69,10 @@ namespace MachineRancher
         public abstract string Name { get; set; }  
         public abstract string Description { get; }
         //public abstract string Websocket { get; set; }
+
+        public Machine(string name)
+        {
+            this.Name = name;
+        }
     }
 }

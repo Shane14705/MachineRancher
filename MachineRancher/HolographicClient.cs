@@ -30,7 +30,7 @@ namespace MachineRancher
         private Channel<string> to_self = Channel.CreateUnbounded<string>();
         private Channel<string> to_server = Channel.CreateUnbounded<string>();
 
-        public HolographicClient() : base()
+        public HolographicClient(Guid websocket_id, SendClient send_func) : base(websocket_id, send_func)
         {
             
         }
