@@ -162,6 +162,21 @@ namespace MachineRancher
                     };
                     */
                     Task.Run(new_client.StartAsync);
+                    Task.Run(async () =>
+                    {
+                        while (!new_client.main_token.IsCancellationRequested)
+                        {
+                            await foreach (string incoming_msg in new_client.To_Rancher.Reader.ReadAllAsync(new_client.main_token))
+                            {
+                                if (incoming_msg.StartsWith("discovered_machine~"))
+                                {
+                                    //Writes either the first matching machine name or null
+                                    new_client.SharedMachines.Writer.TryWrite(this.machines.Find((machine) => { return incoming_msg.Remove(0, 19).Equals(machine.Name); }));
+                                }
+                            }
+                        }
+                    });
+
                     return;
 
                 }

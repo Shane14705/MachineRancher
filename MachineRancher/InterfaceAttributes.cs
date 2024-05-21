@@ -43,6 +43,8 @@ namespace MachineRancher
 
         public abstract Channel<string> To_Rancher { get; }
 
+        public abstract Channel<Machine> SharedMachines { get; }
+
         protected CancellationTokenSource CancellationTokenSource = new CancellationTokenSource();
         public CancellationToken main_token;
 
