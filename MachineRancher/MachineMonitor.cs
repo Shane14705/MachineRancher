@@ -313,7 +313,7 @@ namespace MachineRancher
                     {
                         var target = monitored_properties[e.ApplicationMessage.Topic];
                         var str = e.ApplicationMessage.ConvertPayloadToString();
-                        logger.LogInformation(str);
+                        //logger.LogInformation(str);
 
                         Dictionary<string, object> dict = JsonSerializer.Deserialize<Dictionary<string, object>>(str);
                         if (target.Item2.PropertyType == typeof(float))
@@ -332,7 +332,16 @@ namespace MachineRancher
 
                         else if (target.Item2.PropertyType == typeof(string))
                         {
-                            target.Item2.SetValue(target.Item1, str);
+                            object temp;
+                            if (dict.TryGetValue(target.Item3.json_key, out temp))
+                            {
+                                target.Item2.SetValue(target.Item1, temp.ToString());
+                            }
+                            else
+                            {
+                                target.Item2.SetValue(target.Item1, str);
+                            }
+                            
                         }
 
                         else
@@ -363,7 +372,7 @@ namespace MachineRancher
                 }
                 //REMINDER: NEED TO ADJUST WEBSOCKET TOPIC TO BE JSON AND STRING OF "IP:PORT", ALSO NEED TO MAKE ALL OTHER TOPICS BE JSON AS WELL (LIKE NOZZLE SIZE)
                 //TODO: TOMORROW, WE IMPLEMENT FUNCTIONS (ie: printer leveling)
-                while (true) await Task.Delay(1000);
+                while (true) await Task.Delay(500);
 
             }
             

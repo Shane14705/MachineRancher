@@ -11,6 +11,16 @@ using Microsoft.Extensions.Logging;
 
 namespace MachineRancher
 {
+    public enum PrinterState
+    {
+        Standby,
+        Printing,
+        Paused,
+        Complete,
+        Cancelled,
+        Error
+    };
+
     [DiscoveryTopic("Printers/#")]
     internal class Printer : Machine
     {
@@ -50,6 +60,13 @@ namespace MachineRancher
                 int.TryParse(temp[1], out websocket_port);
             }
         }
+
+        [MonitorRegistration("Printers/*/klipper/state/print_stats/state", "value")]
+        public string Printer_State { get => printer_state.ToString(); set => printer_state = (PrinterState) Enum.Parse(typeof(PrinterState), (char.ToUpper(value[0]) + value.Substring(1))); }
+
+        
+
+        public PrinterState printer_state;
 
         private string websocket_addr = string.Empty;
 

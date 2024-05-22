@@ -102,6 +102,42 @@ namespace MachineRancher
                         }
                     }
 
+                    if (args[0].StartsWith("login"))
+                    {
+                        //Remark: Another spot where duplicate machine names can be problematic
+                        Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+                        if (target != null)
+                        {
+                            int temp_state;
+                            this.current_machines.TryGetValue(target, out temp_state);
+                            switch (target.GetType().Name)
+                            {
+                                case ("Printer"):
+                                    Printer printer = (Printer)target;
+                                    await send_client("current_state~" + printer.Name + "~" + printer.Printer_State);
+                                    //PRINTER_UI_STATE printer_interface_state = (PRINTER_UI_STATE) temp_state;
+                                   
+                                    
+                                    //switch (printer.printer_state)
+                                    //{
+                                    //    case (PrinterState.Printing):
+                                    //    case (PrinterState.Standby):
+                                    //    case (PrinterState.Cancelled):
+                                    //    case (PrinterState.C)
+
+                                    //}
+                                    await send_client(printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed);
+                                    break;
+
+                                default:
+                                    await send_client("No implementation of get_stats for this machine type");
+                                    break;
+
+                            }
+                        }
+                        
+                    }
+
                 }
             }
         }
@@ -112,7 +148,27 @@ namespace MachineRancher
             Machine new_machine = await shared_machines.Reader.ReadAsync(token);
             if (new_machine != null)
             {
+                logger.LogInformation("Holographic Client discovered new machine: " + new_machine.Name);
                 current_machines.Add(new_machine, 0);
+                switch (new_machine.GetType().Name)
+                {
+                    case ("Printer"):
+                        {
+                            logger.LogInformation("Beginning sending status updates to holographic client.");
+                            Printer printer = (Printer)new_machine;
+                            //Start sending status updates
+                            //Remark: Main flaw here is the use of the main token, meaning that we cannot shut off status updates for individual machines unless we kill the entire client
+                            Task.Run(async () =>
+                            {
+                                while (!main_token.IsCancellationRequested)
+                                {
+                                    await send_client("stat_update~" + printer.Name + "~" + printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed);
+                                    await Task.Delay(5000, main_token);
+                                }
+                            });
+                            break;
+                        }
+                }
                 return true;
             }
             else
