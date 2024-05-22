@@ -5,6 +5,7 @@ using System.Threading.Channels;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 namespace MachineRancher
 {
@@ -43,9 +44,12 @@ namespace MachineRancher
 
         //Idea: Different state enums for diff type of machines, interpret int as a member of the correct enum, find correct enum by checking full type of machine. 0 is starting status for all discovered machines (ie status overlay state)
         private Dictionary<Machine, int> current_machines = new Dictionary<Machine, int>();
+        private ILogger logger;
 
         public HolographicClient(Guid websocket_id, SendClient send_func) : base(websocket_id, send_func)
         {
+            using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
+            this.logger = factory.CreateLogger<HolographicClient>();
             
         }
 
@@ -53,8 +57,6 @@ namespace MachineRancher
          *  - Hololens will send message everytime a new qr code is discovered
          *  - When logged into a specific printer, create a new "state" for that machine providing whatever a first task is (for now, we will focus on printer only)
          *      - Maintain state, so when we switch between printers we can resume where we were
-         *
-         * 
          */
         protected override async Task MainLoop(CancellationToken token)
         {
@@ -62,13 +64,14 @@ namespace MachineRancher
             {
                 await foreach (string incoming_msg in to_self.Reader.ReadAllAsync(token))
                 {
-                    if (incoming_msg.StartsWith("discovered_machine~"))
+                    string[] args = incoming_msg.Split('~');
+                    if (args[0].Equals("discovered_machine"))
                     {
                         Task.Run(async () => await RequestMachine(incoming_msg, token));
                         
                     }
 
-                    if (incoming_msg.StartsWith("list_machines"))
+                    if (args[0].Equals("list_machines"))
                     {
                         foreach (var machine in current_machines.Keys) {
                             await send_client(machine.Name);
@@ -76,12 +79,29 @@ namespace MachineRancher
                         
                     }
 
-                    //if (incoming_msg.StartsWith("get_stats~"))
-                    //{
+                    if (args[0].StartsWith("get_stats"))
+                    {
+                        //Remark: Another spot where duplicate machine names can be problematic
+                        Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
 
-                    //}
+                        if (target != null)
+                        {
+                            switch (target.GetType().Name)
+                            {
+                                case ("Printer"):
+                                    Printer printer = (Printer)target;
 
-                    //await send_client(incoming_msg);
+                                    await send_client(printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed);
+                                    break;
+
+                                default:
+                                    await send_client("No implementation of get_stats for this machine type");
+                                    break;
+
+                            }
+                        }
+                    }
+
                 }
             }
         }
@@ -97,7 +117,7 @@ namespace MachineRancher
             }
             else
             {
-                Console.WriteLine("Successfully returned from invalid machine request.");
+                logger.LogWarning("Invalid machine request: " + machine_name.Split("~")[1] + " could not be found by the rancher!");
                 return false;
             }
         }

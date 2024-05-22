@@ -45,7 +45,7 @@ namespace MachineRancher
             this.clients = new Dictionary<Guid, Interface>();
             //var configuration = new ConfigurationBuilder()
             //    .AddIniFile("appsettings.ini", optional: false, reloadOnChange: false)
-            //    .Build();
+            //    .Build()
             this.configuration = configuration;
             var mqttsection = this.configuration.GetSection("MQTTSetup");
             this.logger = logger;
@@ -152,6 +152,7 @@ namespace MachineRancher
                     {
                         return await this.listen_server.SendAsync(e.Client.Guid, msg);
                     })];
+                    
                     Interface new_client = (Interface)Activator.CreateInstance(Type.GetType(client_type.Value.FullName), temp);
                     this.clients.Add(e.Client.Guid, new_client);
                     /*

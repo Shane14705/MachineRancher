@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Text.Json;
 using System.Net;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
 
 namespace MachineRancher
 {
@@ -54,6 +55,8 @@ namespace MachineRancher
 
         private int websocket_port = -1;
 
+        private ILogger logger;
+
         //[MonitorRegistration("Printers/*/moonraker/state/nozzle_size")]
         //public float Nozzle_Size { get => nozzle_size; set => nozzle_size = value; } //Note: we can do averaging here, or do it in the mqtt monitor. Probably more efficient to do in the monitor
 
@@ -61,6 +64,8 @@ namespace MachineRancher
 
         public Printer(string name) : base(name)
         {
+            using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
+            this.logger = factory.CreateLogger<Printer>();
         }
 
 
@@ -91,7 +96,7 @@ namespace MachineRancher
             string[] values = adjustment.Split(':');
             if (values.Length != 2) 
             {
-                Console.WriteLine("error: unexpected adj string: " + adjustment);
+                logger.LogError("Unexpected bed level screw adjustment string: " + adjustment);
                 return 0;
             }
 
@@ -148,7 +153,7 @@ namespace MachineRancher
             if (waitTask != await Task.WhenAny(waitTask, Task.Delay(10000)))
             {
                 tokenSource.Cancel();
-                Console.WriteLine("Printable file list retrieval timed out!");
+                logger.LogWarning("Printable file list retrieval timed out!");
             }
 
             return ret;
@@ -159,13 +164,13 @@ namespace MachineRancher
         {
             if (string.IsNullOrWhiteSpace(websocket_addr) || websocket_port < 0)
             {
-                Console.WriteLine("No websocket available!");
+                logger.LogCritical("No websocket available!");
                 return null;
             }
 
             WatsonWsClient client = new WatsonWsClient(websocket_addr, websocket_port);
             client.StartWithTimeoutAsync(10).Wait();
-            Console.WriteLine("Connected to " + this.name + "!");
+            logger.LogInformation("Connected to " + this.name + "!");
 
             await Send_Command(client, "G28");
             await Send_Command(client, "SCREWS_TILT_CALCULATE");
@@ -201,7 +206,6 @@ namespace MachineRancher
                                 leveling_info["rear left"] = string_to_rotations(val);
                                 return;
                             }
-                            Console.WriteLine(msg);
                         }
                     }
                 };
@@ -222,7 +226,7 @@ namespace MachineRancher
             if (waitTask != await Task.WhenAny(waitTask, Task.Delay(30000)))
             {
                 tokenSource.Cancel();
-                Console.WriteLine("Bed leveling timed out!");
+                logger.LogError("Bed leveling timed out!");
             }
 
             await client.StopAsync();
