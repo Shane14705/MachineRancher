@@ -177,6 +177,7 @@ namespace MachineRancher
 
         }
 
+        private bool currently_leveling = false;
         public async Task<Dictionary<string, float>?> LevelBed()
         {
             if (string.IsNullOrWhiteSpace(websocket_addr) || websocket_port < 0)
@@ -185,6 +186,7 @@ namespace MachineRancher
                 return null;
             }
 
+            currently_leveling = true;
             WatsonWsClient client = new WatsonWsClient(websocket_addr, websocket_port);
             client.StartWithTimeoutAsync(10).Wait();
             logger.LogInformation("Connected to " + this.name + "!");
@@ -246,6 +248,7 @@ namespace MachineRancher
                 logger.LogError("Bed leveling timed out!");
             }
 
+            currently_leveling = false;
             await client.StopAsync();
 
             return leveling_info;

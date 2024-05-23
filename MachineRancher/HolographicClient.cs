@@ -67,16 +67,60 @@ namespace MachineRancher
                     string[] args = incoming_msg.Split('~');
                     if (args[0].Equals("discovered_machine"))
                     {
-                        Task.Run(async () => await RequestMachine(incoming_msg, token));
-                        
+                        Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+                        if (target == null)
+                        {
+                            Task.Run(async () => await RequestMachine(incoming_msg, token));
+                        }
+                        else
+                        {
+                            await send_client("error~already_exists~" + args[1]);
+                        }
                     }
 
-                    if (args[0].Equals("list_machines"))
-                    {
-                        foreach (var machine in current_machines.Keys) {
-                            await send_client(machine.Name);
-                        }
+                    //if (args[0].Equals("list_machines"))
+                    //{
+                    //    foreach (var machine in current_machines.Keys) {
+                    //        await send_client(machine.Name);
+                    //    }
                         
+                    //}
+
+                    if (args[0].Equals("start_leveling"))
+                    {
+                        //Remark: Another spot where duplicate machine names can be problematic
+                        Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+
+                        if (target != null)
+                        {
+                            switch (target.GetType().Name)
+                            {
+                                case ("Printer"):
+                                    Printer printer = (Printer)target;
+                                    Task.Run(async () =>
+                                    {
+                                        Dictionary<string, float> results = await printer.LevelBed();
+                                        if (main_token.IsCancellationRequested) //prevent zombie leveling info from being sent
+                                        {
+                                            return;
+                                        }
+                                        if (results.Keys.Count == 4)
+                                        {
+                                            await send_client("level_info~" + results["front left"] + "~" + results["front right"] + "~" + results["rear left"] + "~" + results["rear right"]);
+                                        }
+                                        else
+                                        {
+                                            logger.LogError("Bed leveling did not return 4 values.");
+                                        }
+                                    });
+                                    break;
+
+                                default:
+                                    await send_client("No implementation of start_leveling for this machine type");
+                                    break;
+
+                            }
+                        }
                     }
 
                     if (args[0].StartsWith("get_stats"))
@@ -138,6 +182,36 @@ namespace MachineRancher
                         
                     }
 
+                    if (args[0].Equals("retrieve_printables"))
+                    {
+                        //Remark: Another spot where duplicate machine names can be problematic
+                        Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+
+                        if (target != null)
+                        {
+                            switch (target.GetType().Name)
+                            {
+                                case ("Printer"):
+                                    Printer printer = (Printer)target;
+
+                                    Task.Run(async () =>
+                                    {
+                                        List<string> results = await printer.RetrievePrintables();
+                                        if (!main_token.IsCancellationRequested)
+                                        {
+                                            await send_client("available_printables~" + printer.Name + "~" + string.Join('~', results));
+                                        }
+                                    });
+                                    break;
+
+                                default:
+                                    await send_client("No implementation of retrieve_printables for this machine type");
+                                    break;
+
+                            }
+                        }
+                    }
+
                 }
             }
         }
@@ -156,6 +230,7 @@ namespace MachineRancher
                         {
                             logger.LogInformation("Beginning sending status updates to holographic client.");
                             Printer printer = (Printer)new_machine;
+                            await send_client("machine_confirmed~" + printer.Name + "~");
                             //Start sending status updates
                             //Remark: Main flaw here is the use of the main token, meaning that we cannot shut off status updates for individual machines unless we kill the entire client
                             Task.Run(async () =>
@@ -173,6 +248,7 @@ namespace MachineRancher
             }
             else
             {
+                await send_client("error~unrecognized~" + machine_name.Split("~")[1]);
                 logger.LogWarning("Invalid machine request: " + machine_name.Split("~")[1] + " could not be found by the rancher!");
                 return false;
             }
