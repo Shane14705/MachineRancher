@@ -78,14 +78,6 @@ namespace MachineRancher
                         }
                     }
 
-                    //if (args[0].Equals("list_machines"))
-                    //{
-                    //    foreach (var machine in current_machines.Keys) {
-                    //        await send_client(machine.Name);
-                    //    }
-                        
-                    //}
-
                     if (args[0].Equals("start_leveling"))
                     {
                         //Remark: Another spot where duplicate machine names can be problematic
@@ -96,6 +88,7 @@ namespace MachineRancher
                             switch (target.GetType().Name)
                             {
                                 case ("Printer"):
+                                    current_machines[target] = (int) PRINTER_UI_STATE.Print_Menu;
                                     Printer printer = (Printer)target;
                                     Task.Run(async () =>
                                     {
@@ -146,21 +139,26 @@ namespace MachineRancher
                         }
                     }
 
-                    if (args[0].StartsWith("login"))
+                    if (args[0].StartsWith("login") || args[0].Equals("advance")) 
                     {
                         //Remark: Another spot where duplicate machine names can be problematic
                         Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
                         if (target != null)
                         {
-                            int temp_state;
-                            this.current_machines.TryGetValue(target, out temp_state);
                             switch (target.GetType().Name)
                             {
                                 case ("Printer"):
                                     Printer printer = (Printer)target;
-                                    await send_client("current_state~" + printer.Name + "~" + printer.Printer_State);
-                                    //PRINTER_UI_STATE printer_interface_state = (PRINTER_UI_STATE) temp_state;
-                                   
+                                    PRINTER_UI_STATE printer_interface_state = (PRINTER_UI_STATE) this.current_machines[target];
+
+                                    switch (printer_interface_state)
+                                    {
+                                        case PRINTER_UI_STATE.Status:
+                                            current_machines[target] = (int) PRINTER_UI_STATE.Leveling;
+                                            break;
+                                    }
+                                    await send_client("login_state~" + printer.Name + "~" + printer.Printer_State + "~" + current_machines[target].ToString());
+                                    
                                     
                                     //switch (printer.printer_state)
                                     //{
@@ -170,7 +168,7 @@ namespace MachineRancher
                                     //    case (PrinterState.C)
 
                                     //}
-                                    await send_client(printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed);
+                                    //await send_client(printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed);
                                     break;
 
                                 default:
@@ -180,6 +178,32 @@ namespace MachineRancher
                             }
                         }
                         
+                    }
+
+                    if (args[0].Equals("toggle_printing"))
+                    {
+                        //Remark: Another spot where duplicate machine names can be problematic
+                        Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+
+                        if (target != null)
+                        {
+                            switch (target.GetType().Name)
+                            {
+                                case ("Printer"):
+                                    Printer printer = (Printer)target;
+
+                                    Task.Run(async () =>
+                                    {
+                                        await printer.Toggle_Printing();
+                                    });
+                                    break;
+
+                                default:
+                                    await send_client("No implementation of toggle_printing for this machine type");
+                                    break;
+
+                            }
+                        }
                     }
 
                     if (args[0].Equals("retrieve_printables"))
@@ -237,7 +261,7 @@ namespace MachineRancher
                             {
                                 while (!main_token.IsCancellationRequested)
                                 {
-                                    await send_client("stat_update~" + printer.Name + "~" + printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed);
+                                    await send_client("stat_update~" + printer.Name + "~" + printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed + "~" + printer.Printer_State);
                                     await Task.Delay(5000, main_token);
                                 }
                             });

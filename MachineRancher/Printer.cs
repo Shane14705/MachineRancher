@@ -85,13 +85,6 @@ namespace MachineRancher
             this.logger = factory.CreateLogger<Printer>();
         }
 
-
-        /*
-         * async def send_command(self, cmd):
-        async with websockets.connect(self.printer_addr) as websocket:
-            await websocket.send("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.gcode.script\",\"params\": { \"script\": \"" + cmd + "\"}, \"id\": " + str(random.Random().randint(0, 9999)) + "}")
-            #Call the above with BED_SCREWS_ADJUST and wait to receive response we can parse...
-        */
         public async Task Send_Command(string command)
         {
             throw new NotImplementedException();
@@ -101,6 +94,23 @@ namespace MachineRancher
         {
             Random rand = new Random();
             await wsclient.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.gcode.script\",\"params\": { \"script\": \"" + command + "\"}, \"id\": " + rand.Next(0, 9999).ToString() + "}");
+        }
+
+        public async Task Toggle_Printing()
+        {
+            Random rand = new Random();
+            WatsonWsClient client = new WatsonWsClient(websocket_addr, websocket_port);
+            client.StartWithTimeoutAsync(10).Wait();
+            switch (printer_state)
+            {
+                case PrinterState.Printing:
+                    await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.pause\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
+                    break;
+
+                case PrinterState.Paused:
+                    await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.resume\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
+                    break;
+            }
         }
 
         /// <summary>
