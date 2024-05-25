@@ -8,9 +8,47 @@ using System.Text.Json;
 using System.Net;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
+using System.IO;
 
 namespace MachineRancher
 {
+    internal struct Filament
+    {
+        private string material_name = String.Empty;
+        private float first_layer_temp = float.NaN;
+        private float printing_temp = float.NaN;
+        private float bed_temp = float.NaN;
+        private string color = String.Empty;
+        private float required_nozzle_size = float.NaN;
+        private bool needs_hardened_nozzle = false;
+        private float weight = float.NaN;
+
+        public Filament()
+        {
+        }
+
+        public string Material_Name { get => material_name; set => material_name = value; }
+        public float First_Layer_Temp { get => first_layer_temp; set => first_layer_temp = value; }
+        public float Printing_Temp { get => printing_temp; set => printing_temp = value; }
+        public float Bed_Temp { get => bed_temp; set => bed_temp = value; }
+        public string Color { get => color; set => color = value; }
+        public float Required_Nozzle_Size { get => required_nozzle_size; set => required_nozzle_size = value; }
+        public bool Needs_Hardened_Nozzle { get => needs_hardened_nozzle; set => needs_hardened_nozzle = value; }
+        public float Weight { get => weight; set => weight = value; }
+    }
+
+    internal class PrinterDigitalTwin
+    {
+        public Filament Current_Filament { get => current_filament; set => current_filament = value; }
+        private Filament current_filament;
+
+        public float Nozzle_Size { get => nozzle_size; set => nozzle_size = (float)Math.Floor(value * 10) / 10; }
+        private float nozzle_size;
+
+        public bool Has_Hardened_Nozzle { get => has_hardened_nozzle; set => has_hardened_nozzle = value; }
+        private bool has_hardened_nozzle;
+    }
+
     public enum PrinterState
     {
         Standby,
@@ -74,6 +112,8 @@ namespace MachineRancher
 
         private ILogger logger;
 
+        private PrinterDigitalTwin digitaltwin = null;
+
         //[MonitorRegistration("Printers/*/moonraker/state/nozzle_size")]
         //public float Nozzle_Size { get => nozzle_size; set => nozzle_size = value; } //Note: we can do averaging here, or do it in the mqtt monitor. Probably more efficient to do in the monitor
 
@@ -105,6 +145,56 @@ namespace MachineRancher
                 case PrinterState.Paused:
                     await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.resume\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
                     break;
+            }
+        }
+
+        private void deserialize_digitaltwin(string json)
+        {
+            logger.LogInformation(json);
+            this.digitaltwin = JsonSerializer.Deserialize<PrinterDigitalTwin>(
+                JsonSerializer.Deserialize<Dictionary<string, string>>(json)["result"]
+                );
+        }
+
+        public async Task<bool> refresh_digitaltwin()
+        {
+            WatsonWsClient client = new WatsonWsClient(websocket_addr, websocket_port);
+            Random rand = new Random();
+            int request_id = rand.Next(0, 9999);
+            bool response_received = false;
+            client.MessageReceived += (sender, message) =>
+            {
+                string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
+                if (msg.Contains("\"id\": " + request_id.ToString()))
+                {
+                    deserialize_digitaltwin(msg);
+
+                    response_received = true;
+                }
+            };
+            await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.printer_state.get\", \"id\": " + request_id.ToString() + "}");
+
+            //TODO: Figure out config file so we can make these delays customizable
+            var tokenSource = new CancellationTokenSource();
+            var token = tokenSource.Token;
+            var waitTask = Task.Run((async () =>
+            {
+                while (!response_received)
+                {
+                    token.ThrowIfCancellationRequested();
+                    await Task.Delay(50, token);
+                }
+            }), tokenSource.Token);
+
+            if (waitTask != await Task.WhenAny(waitTask, Task.Delay(10000)))
+            {
+                tokenSource.Cancel();
+                logger.LogWarning("Digital twin retrieval timed out!");
+                return false;
+            }
+            else
+            {
+                return true;
             }
         }
 
@@ -278,31 +368,126 @@ namespace MachineRancher
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.emergency_stop\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
         }
 
+        struct PrintRequirements
+        {
+            public float nozzle_diameter { get => requested_diameter; set => requested_diameter = (float)Math.Floor(value * 10) / 10; }
+            private float requested_diameter = float.NaN;
+
+            public string filament_type { get => filament_name; set => filament_name = value; }
+            private string filament_name = String.Empty;
+
+            public float filament_weight_total { get => weight_required; set => weight_required = value; }
+            private float weight_required = float.NaN;
+
+            public PrintRequirements()
+            {
+            }
+        }
+
+        private async Task<PrintRequirements> GetPrintRequirements(string filename)
+        {
+            WatsonWsClient client = new WatsonWsClient(websocket_addr, websocket_port);
+            Random rand = new Random();
+            int request_id = rand.Next(0, 9999);
+            bool response_received = false;
+            PrintRequirements new_reqs = new();
+            client.MessageReceived += (sender, message) =>
+            {
+                string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
+                if (msg.Contains("\"id\": " + request_id.ToString()))
+                {
+                    logger.LogInformation(msg);
+                    new_reqs = JsonSerializer.Deserialize<PrintRequirements>(
+                        JsonSerializer.Deserialize<Dictionary<string, string>>(msg)["result"]
+                        );
+
+                    response_received = true;
+                }
+            };
+            await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"server.files.metascan\", \"params\" : { \"filename\": \"" + filename + "\"}, \"id\": " + request_id.ToString() + "}");
+
+            //TODO: Figure out config file so we can make these delays customizable
+            var tokenSource = new CancellationTokenSource();
+            var token = tokenSource.Token;
+            var waitTask = Task.Run((async () =>
+            {
+                while (!response_received)
+                {
+                    token.ThrowIfCancellationRequested();
+                    await Task.Delay(50, token);
+                }
+            }), tokenSource.Token);
+
+            if (waitTask != await Task.WhenAny(waitTask, Task.Delay(10000)))
+            {
+                tokenSource.Cancel();
+                logger.LogWarning("Print requirements retrieval timed out!");
+            }
+            
+            return new_reqs;
+        }
+
+        private (bool, string) check_print_compat(PrintRequirements reqs, PrinterDigitalTwin digitaltwin)
+        {
+            (bool, string) result = (false, string.Empty);
+            List<string> conflicts = new List<string>();
+
+            if (reqs.nozzle_diameter != float.NaN && digitaltwin.Nozzle_Size != float.NaN) 
+            {
+                if (reqs.nozzle_diameter != digitaltwin.Nozzle_Size)
+                {
+                    conflicts.Add("Nozzle Diameter Mismatch: Print requires " + reqs.nozzle_diameter.ToString() + " vs Current Size: " + digitaltwin.Nozzle_Size.ToString());
+                }
+            }
+
+            if (reqs.filament_type != String.Empty && digitaltwin.Current_Filament.Material_Name != String.Empty)
+            {
+                if (reqs.filament_type != String.Empty && reqs.filament_type != digitaltwin.Current_Filament.Material_Name)
+                {
+                    conflicts.Add("Filament Type Mismatch: Print requires " + reqs.filament_type + " vs Current Type: " + digitaltwin.Current_Filament.Material_Name);
+                }
+            }
+            if (reqs.filament_weight_total != float.NaN && digitaltwin.Current_Filament.Weight != float.NaN)
+            {
+                if (reqs.filament_weight_total > digitaltwin.Current_Filament.Weight)
+                {
+                    conflicts.Add("Not Enough Filament: Print requires " + reqs.filament_weight_total + "kg vs Current Amount: " + digitaltwin.Current_Filament.Weight + "kg");
+                }
+            }
+
+            if (conflicts.Count == 0)
+            {
+                result.Item1 = true;
+                return result;
+            }
+            else
+            {
+                result.Item1 = false;
+                result.Item2 = string.Join("\n", conflicts);
+                return result;
+            }
+            
+
+        }
+
         public async Task<(bool, string)> TryPrint(string filename)
         {
-            (bool, string) output = (false, string.Empty);
             //TODO HERE: DO PRINT COMPATIBILITY CHECK!
-            if (PRINT is COMPATIBLE)
+            PrintRequirements reqs = await GetPrintRequirements(filename);
+            await refresh_digitaltwin();
+
+            (bool, string) result = check_print_compat(reqs, digitaltwin);
+
+            if (result.Item1)
             {
-                output.Item1 = true;
                 Random rand = new Random();
                 WatsonWsClient client = new WatsonWsClient(websocket_addr, websocket_port);
                 client.StartWithTimeoutAsync(10).Wait();
 
                 await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.start\",\"params\": { \"filename\": \"" + filename + "\"}, \"id\": " + rand.Next(0, 9999).ToString() + "}");
-                return output;
             }
 
-            else
-            {
-                output.Item1 = false;
-                output.Item2 = "ERROR DESCRIPTION MESSAGE";
-
-                return output;
-            }
-
-
-            
+            return result;
         }
     }
 
