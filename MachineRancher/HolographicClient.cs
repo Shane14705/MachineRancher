@@ -30,6 +30,7 @@ namespace MachineRancher
 
         public override Channel<string> To_Rancher => to_server;
 
+        //TODO: Turn "stat_update" messages into a function which, when called, takes deltas from the printer values when it was last called so as to only send the changed values
         public override SendClient SendClient { get => send_client; set => send_client = value; }
 
         public override Channel<Machine> SharedMachines => shared_machines;
@@ -65,177 +66,314 @@ namespace MachineRancher
                 await foreach (string incoming_msg in to_self.Reader.ReadAllAsync(token))
                 {
                     string[] args = incoming_msg.Split('~');
-                    if (args[0].Equals("discovered_machine"))
+                    switch (args[0])
                     {
-                        Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
-                        if (target == null)
+                        case "discovered_machine":
                         {
-                            Task.Run(async () => await RequestMachine(incoming_msg, token));
-                        }
-                        else
-                        {
-                            await send_client("error~already_exists~" + args[1]);
-                        }
-                    }
-
-                    if (args[0].Equals("start_leveling"))
-                    {
-                        //Remark: Another spot where duplicate machine names can be problematic
-                        Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
-
-                        if (target != null)
-                        {
-                            switch (target.GetType().Name)
+                            Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+                            if (target == null)
                             {
-                                case ("Printer"):
-                                    current_machines[target] = (int) PRINTER_UI_STATE.Print_Menu;
-                                    Printer printer = (Printer)target;
-                                    Task.Run(async () =>
-                                    {
-                                        Dictionary<string, float> results = await printer.LevelBed();
-                                        if (main_token.IsCancellationRequested) //prevent zombie leveling info from being sent
+                                Task.Run(async () => await RequestMachine(incoming_msg, token));
+                            }
+                            else
+                            {
+                                await send_client("error~already_exists~" + args[1]);
+                            }
+                            break;
+                        }
+
+                        case "request_print":
+                        {
+                            //Remark: Another spot where duplicate machine names can be problematic
+                            Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+
+                            if (target != null)
+                            {
+                                switch (target.GetType().Name)
+                                {
+                                    case ("Printer"):
+                                        Printer printer = (Printer)target;
+
+                                        Task.Run(async () =>
                                         {
-                                            return;
-                                        }
-                                        if (results.Keys.Count == 4)
+                                            (bool, string) output = await printer.TryPrint(args[2]);
+                                            if (output.Item1)
+                                            {
+                                                current_machines[target] = (int)PRINTER_UI_STATE.Status; 
+                                                await send_client("login_state~" + printer.Name + "~" + printer.Printer_State + "~" + current_machines[target].ToString());
+                                                await send_client("stat_update~" + printer.Name + "~" + printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed + "~" + printer.Printer_State);
+                                            }
+                                            else
+                                            {
+                                                await send_client("notification~Unable to Print!~" + output.Item2);
+                                            }
+                                        });
+                                        break;
+
+                                    default:
+                                        await send_client("No implementation of toggle_printing for this machine type");
+                                        break;
+
+                                }
+                            }
+                            break;
+                        }
+
+                        case "start_leveling":
+                        {
+                            //Remark: Another spot where duplicate machine names can be problematic
+                            Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+
+                            if (target != null)
+                            {
+                                switch (target.GetType().Name)
+                                {
+                                    case ("Printer"):
+                                        current_machines[target] = (int) PRINTER_UI_STATE.Print_Menu;
+                                        Printer printer = (Printer)target;
+                                        Task.Run(async () =>
                                         {
-                                            await send_client("level_info~" + results["front left"] + "~" + results["front right"] + "~" + results["rear left"] + "~" + results["rear right"]);
-                                        }
-                                        else
+                                            Dictionary<string, float> results = await printer.LevelBed();
+                                            if (main_token.IsCancellationRequested) //prevent zombie leveling info from being sent
+                                            {
+                                                return;
+                                            }
+                                            if (results.Keys.Count == 4)
+                                            {
+                                                await send_client("level_info~" + printer.Name + "~" +results["front left"] + "~" + results["front right"] + "~" + results["rear left"] + "~" + results["rear right"]);
+                                            }
+                                            else
+                                            {
+                                                logger.LogError("Bed leveling did not return 4 values.");
+                                            }
+                                        });
+                                        break;
+
+                                    default:
+                                        await send_client("No implementation of start_leveling for this machine type");
+                                        break;
+
+                                }
+                            }
+                            break;
+                        }
+
+
+                        case "get_stats":
+                        {
+                            //Remark: Another spot where duplicate machine names can be problematic
+                            Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+
+                            if (target != null)
+                            {
+                                switch (target.GetType().Name)
+                                {
+                                    case ("Printer"):
+                                        Printer printer = (Printer)target;
+
+                                        await send_client(printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed);
+                                        break;
+
+                                    default:
+                                        await send_client("No implementation of get_stats for this machine type");
+                                        break;
+
+                                }
+                            }
+                            break;
+                        }
+
+                        //Interface functions
+                        case "login":
+                        case "advance":
+                        case "reverse":
+                        {
+                            //Remark: Another spot where duplicate machine names can be problematic
+                            Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+                            if (target != null)
+                            {
+                                switch (target.GetType().Name)
+                                {
+                                    case ("Printer"):
+                                        Printer printer = (Printer)target;
+                                        PRINTER_UI_STATE printer_interface_state = (PRINTER_UI_STATE)this.current_machines[target];
+
+                                        if (args[0].Equals("advance"))
                                         {
-                                            logger.LogError("Bed leveling did not return 4 values.");
+                                            switch (printer_interface_state)
+                                            {
+                                                case PRINTER_UI_STATE.Status:
+                                                    current_machines[target] = (int)PRINTER_UI_STATE.Leveling;
+                                                    break;
+
+                                                case PRINTER_UI_STATE.Leveling:
+                                                    current_machines[target] = (int)PRINTER_UI_STATE.Confirmation;
+                                                    break;
+
+                                                case PRINTER_UI_STATE.Confirmation:
+                                                    current_machines[target] = (int)PRINTER_UI_STATE.Print_Menu;
+                                                    break;
+
+                                                case PRINTER_UI_STATE.Print_Menu:
+                                                    current_machines[target] = (int)PRINTER_UI_STATE.Status;
+                                                    break;
+                                            }
                                         }
-                                    });
-                                    break;
-
-                                default:
-                                    await send_client("No implementation of start_leveling for this machine type");
-                                    break;
-
-                            }
-                        }
-                    }
-
-                    if (args[0].StartsWith("get_stats"))
-                    {
-                        //Remark: Another spot where duplicate machine names can be problematic
-                        Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
-
-                        if (target != null)
-                        {
-                            switch (target.GetType().Name)
-                            {
-                                case ("Printer"):
-                                    Printer printer = (Printer)target;
-
-                                    await send_client(printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed);
-                                    break;
-
-                                default:
-                                    await send_client("No implementation of get_stats for this machine type");
-                                    break;
-
-                            }
-                        }
-                    }
-
-                    if (args[0].StartsWith("login") || args[0].Equals("advance")) 
-                    {
-                        //Remark: Another spot where duplicate machine names can be problematic
-                        Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
-                        if (target != null)
-                        {
-                            switch (target.GetType().Name)
-                            {
-                                case ("Printer"):
-                                    Printer printer = (Printer)target;
-                                    PRINTER_UI_STATE printer_interface_state = (PRINTER_UI_STATE) this.current_machines[target];
-
-                                    switch (printer_interface_state)
-                                    {
-                                        case PRINTER_UI_STATE.Status:
-                                            current_machines[target] = (int) PRINTER_UI_STATE.Leveling;
-                                            break;
-                                    }
-                                    await send_client("login_state~" + printer.Name + "~" + printer.Printer_State + "~" + current_machines[target].ToString());
-                                    
-                                    
-                                    //switch (printer.printer_state)
-                                    //{
-                                    //    case (PrinterState.Printing):
-                                    //    case (PrinterState.Standby):
-                                    //    case (PrinterState.Cancelled):
-                                    //    case (PrinterState.C)
-
-                                    //}
-                                    //await send_client(printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed);
-                                    break;
-
-                                default:
-                                    await send_client("No implementation of get_stats for this machine type");
-                                    break;
-
-                            }
-                        }
-                        
-                    }
-
-                    if (args[0].Equals("toggle_printing"))
-                    {
-                        //Remark: Another spot where duplicate machine names can be problematic
-                        Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
-
-                        if (target != null)
-                        {
-                            switch (target.GetType().Name)
-                            {
-                                case ("Printer"):
-                                    Printer printer = (Printer)target;
-
-                                    Task.Run(async () =>
-                                    {
-                                        await printer.Toggle_Printing();
-                                    });
-                                    break;
-
-                                default:
-                                    await send_client("No implementation of toggle_printing for this machine type");
-                                    break;
-
-                            }
-                        }
-                    }
-
-                    if (args[0].Equals("retrieve_printables"))
-                    {
-                        //Remark: Another spot where duplicate machine names can be problematic
-                        Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
-
-                        if (target != null)
-                        {
-                            switch (target.GetType().Name)
-                            {
-                                case ("Printer"):
-                                    Printer printer = (Printer)target;
-
-                                    Task.Run(async () =>
-                                    {
-                                        List<string> results = await printer.RetrievePrintables();
-                                        if (!main_token.IsCancellationRequested)
+                                        else if (args[0].Equals("reverse"))
                                         {
-                                            await send_client("available_printables~" + printer.Name + "~" + string.Join('~', results));
+                                            switch (printer_interface_state)
+                                            {
+                                                case PRINTER_UI_STATE.Leveling:
+                                                    current_machines[target] = (int)PRINTER_UI_STATE.Status;
+                                                    break;
+
+                                                case PRINTER_UI_STATE.Confirmation:
+                                                    current_machines[target] = (int)PRINTER_UI_STATE.Leveling;
+                                                    break;
+
+                                                case PRINTER_UI_STATE.Print_Menu:
+                                                    current_machines[target] = (int)PRINTER_UI_STATE.Confirmation;
+                                                    break;
+                                            }
                                         }
-                                    });
-                                    break;
+                                        await send_client("login_state~" + printer.Name + "~" + printer.Printer_State + "~" + current_machines[target].ToString());
 
-                                default:
-                                    await send_client("No implementation of retrieve_printables for this machine type");
-                                    break;
 
+                                        //switch (printer.printer_state)
+                                        //{
+                                        //    case (PrinterState.Printing):
+                                        //    case (PrinterState.Standby):
+                                        //    case (PrinterState.Cancelled):
+                                        //    case (PrinterState.C)
+
+                                        //}
+                                        //await send_client(printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed);
+                                        break;
+
+                                    default:
+                                        await send_client("No implementation of get_stats for this machine type");
+                                        break;
+
+                                }
                             }
+                            break;
+                        }
+
+                        case "toggle_printing":
+                        {
+                            //Remark: Another spot where duplicate machine names can be problematic
+                            Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+
+                            if (target != null)
+                            {
+                                switch (target.GetType().Name)
+                                {
+                                    case ("Printer"):
+                                        Printer printer = (Printer)target;
+
+                                        Task.Run(async () =>
+                                        {
+                                            await printer.Toggle_Printing();
+                                            await send_client("stat_update~" + printer.Name + "~" + printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed + "~" + printer.Printer_State);
+                                        });
+                                        break;
+
+                                    default:
+                                        await send_client("No implementation of toggle_printing for this machine type");
+                                        break;
+
+                                }
+                            }
+                            break;
+                        }
+
+                        case "cancel_print":
+                        {
+                            //Remark: Another spot where duplicate machine names can be problematic
+                            Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+
+                            if (target != null)
+                            {
+                                switch (target.GetType().Name)
+                                {
+                                    case ("Printer"):
+                                        Printer printer = (Printer)target;
+
+                                        Task.Run(async () =>
+                                        {
+                                            await printer.Cancel_Print();
+                                            await send_client("stat_update~" + printer.Name + "~" + printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed + "~" + printer.Printer_State);
+                                        });
+                                        break;
+
+                                    default:
+                                        await send_client("No implementation of cancel_print for this machine type");
+                                        break;
+
+                                }
+                            }
+                            break;
+                        }
+
+                        case "estop":
+                        {
+                            //Remark: Another spot where duplicate machine names can be problematic
+                            Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+
+                            if (target != null)
+                            {
+                                switch (target.GetType().Name)
+                                {
+                                    case ("Printer"):
+                                        Printer printer = (Printer)target;
+
+                                        Task.Run(async () =>
+                                        {
+                                            await printer.EStop();
+                                            await send_client("stat_update~" + printer.Name + "~" + printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed + "~" + printer.Printer_State);
+                                        });
+                                        break;
+
+                                    default:
+                                        await send_client("No implementation of cancel_print for this machine type");
+                                        break;
+
+                                }
+                            }
+                            break;
+                        }
+
+                        case "retrieve_printables":
+                        {
+                            //Remark: Another spot where duplicate machine names can be problematic
+                            Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+
+                            if (target != null)
+                            {
+                                switch (target.GetType().Name)
+                                {
+                                    case ("Printer"):
+                                        Printer printer = (Printer)target;
+
+                                        Task.Run(async () =>
+                                        {
+                                            List<string> results = await printer.RetrievePrintables();
+                                            if (!main_token.IsCancellationRequested)
+                                            {
+                                                await send_client("available_printables~" + printer.Name + "~" + string.Join('~', results));
+                                            }
+                                        });
+                                        break;
+
+                                    default:
+                                        await send_client("No implementation of retrieve_printables for this machine type");
+                                        break;
+
+                                }
+                            }
+                            break;
                         }
                     }
-
                 }
             }
         }

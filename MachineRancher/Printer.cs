@@ -85,11 +85,6 @@ namespace MachineRancher
             this.logger = factory.CreateLogger<Printer>();
         }
 
-        public async Task Send_Command(string command)
-        {
-            throw new NotImplementedException();
-        }
-
         public async Task Send_Command(WatsonWsClient wsclient, string command)
         {
             Random rand = new Random();
@@ -264,7 +259,51 @@ namespace MachineRancher
             return leveling_info;
  
         }
-        
+
+        public async Task Cancel_Print()
+        {
+            Random rand = new Random();
+            WatsonWsClient client = new WatsonWsClient(websocket_addr, websocket_port);
+            client.StartWithTimeoutAsync(10).Wait();
+
+            await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.cancel\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
+        }
+
+        public async Task EStop()
+        {
+            Random rand = new Random();
+            WatsonWsClient client = new WatsonWsClient(websocket_addr, websocket_port);
+            client.StartWithTimeoutAsync(10).Wait();
+
+            await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.emergency_stop\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
+        }
+
+        public async Task<(bool, string)> TryPrint(string filename)
+        {
+            (bool, string) output = (false, string.Empty);
+            //TODO HERE: DO PRINT COMPATIBILITY CHECK!
+            if (PRINT is COMPATIBLE)
+            {
+                output.Item1 = true;
+                Random rand = new Random();
+                WatsonWsClient client = new WatsonWsClient(websocket_addr, websocket_port);
+                client.StartWithTimeoutAsync(10).Wait();
+
+                await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.start\",\"params\": { \"filename\": \"" + filename + "\"}, \"id\": " + rand.Next(0, 9999).ToString() + "}");
+                return output;
+            }
+
+            else
+            {
+                output.Item1 = false;
+                output.Item2 = "ERROR DESCRIPTION MESSAGE";
+
+                return output;
+            }
+
+
+            
+        }
     }
 
 
