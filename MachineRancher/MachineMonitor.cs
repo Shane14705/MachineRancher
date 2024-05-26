@@ -320,14 +320,14 @@ namespace MachineRancher
                         {
                             float temp;
                             float.TryParse(dict[target.Item3.json_key].ToString(), out temp);
-                            target.Item2.SetValue(target.Item1, temp);
+                            target.Item2.SetValue(target.Item1, target.Item3.sample_property(temp));
                         }
 
                         else if (target.Item2.PropertyType == typeof(int))
                         {
                             int temp;
                             int.TryParse(dict[target.Item3.json_key].ToString(), out temp);
-                            target.Item2.SetValue(target.Item1, temp);
+                            target.Item2.SetValue(target.Item1, target.Item3.sample_property(temp));
                         }
 
                         else if (target.Item2.PropertyType == typeof(string))
@@ -341,7 +341,6 @@ namespace MachineRancher
                             {
                                 target.Item2.SetValue(target.Item1, str);
                             }
-                            
                         }
 
                         else

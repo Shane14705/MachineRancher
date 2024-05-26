@@ -487,6 +487,7 @@ namespace MachineRancher
 
         }
 
+        private CancellationTokenSource logging_token;
         public async Task<(bool, string)> TryPrint(string filename)
         {
             PrintRequirements reqs = await GetPrintRequirements(filename);
@@ -501,13 +502,37 @@ namespace MachineRancher
                 client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
 
                 await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.start\",\"params\": { \"filename\": \"" + filename + "\"}, \"id\": " + rand.Next(0, 9999).ToString() + "}");
+                this.printer_state = PrinterState.Printing;
 
+                if (int.Parse(this.config["LoggingFrequency"]) > 0)
+                {
+                    if (logging_token != null)
+                    {
+                        logging_token.Cancel();
+                    }
+                    logging_token = new CancellationTokenSource();
+                    string log_name = filename + "_" + DateTime.Now.ToString("MM_DD_yyyy_HH_mm_ss");
+                    Task.Run(async () => await log_machine(logging_token.Token, filename));
+                }
+                
                 await client.StopAsync();
             }
 
             return result;
         }
+
+        private async Task log_machine(CancellationToken token, string filename)
+        {
+            using (StreamWriter log = new StreamWriter(Path.Combine(this.config["LogFolderPath"], filename)))
+            {
+                while (!token.IsCancellationRequested && this.printer_state == PrinterState.Printing)
+                {
+                    log.WriteLine(DateTime.Now.ToString("MM_DD_yyyy_HH_mm_ss") + "," + this.Bed_Temperature + "," + this.Extruder_Temperature + "," + this.Fan_Speed);
+
+                    await Task.Delay(int.Parse(this.config["LoggingFrequency"]));
+                }
+            }
+        }
+            
     }
-
-
 }

@@ -36,6 +36,9 @@ namespace MachineRancher
         public bool is_json;
         public string json_key;
 
+        private Object[] sample_list;
+        private int current_index = 0;
+
         /// <summary>
         /// ONLY SUPPORTS FLOATS, STRINGS, INTS
         /// Registers a property to be updated via MQTT. (The type, ie: whether or not we are dealing with an array, is found by the property's type.
@@ -49,6 +52,46 @@ namespace MachineRancher
             this.topic = topic;
             this.json_key = dict_key;
             this.samples_to_average = samples_to_average;
+        }
+
+        public float sample_property(float new_sample)
+        {
+            if (this.current_index >= samples_to_average)
+            {
+                this.current_index = 0;
+            }
+
+            this.sample_list[this.current_index] = new_sample;
+            this.current_index++;
+
+            float output = 0;
+            foreach (var item in this.sample_list)
+            {
+                output += (float)item;
+            }
+
+            output /= this.sample_list.Length;
+            return output;
+        }
+
+        public int sample_property(int new_sample)
+        {
+            if (this.current_index >= samples_to_average)
+            {
+                this.current_index = 0;
+            }
+
+            this.sample_list[this.current_index] = new_sample;
+            this.current_index++;
+
+            int output = 0;
+            foreach (var item in this.sample_list)
+            {
+                output += (int)item;
+            }
+
+            output /= this.sample_list.Length;
+            return output;
         }
 
     }
