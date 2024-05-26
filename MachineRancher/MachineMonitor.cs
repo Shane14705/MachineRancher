@@ -151,7 +151,7 @@ namespace MachineRancher
                     Object[] temp = [e.Client.Guid, (SendClient) (async (msg) =>
                     {
                         return await this.listen_server.SendAsync(e.Client.Guid, msg);
-                    })];
+                    }), this.configuration.GetRequiredSection(client_type.Value.Name)];
                     
                     Interface new_client = (Interface)Activator.CreateInstance(Type.GetType(client_type.Value.FullName), temp);
                     this.clients.Add(e.Client.Guid, new_client);
@@ -259,7 +259,7 @@ namespace MachineRancher
             {
                 if (machine_plugins.Keys.Contains(pair.Item1))
                 {
-                    Machine new_machine = (Machine)Activator.CreateInstance(Type.GetType(machine_plugins[pair.Item1].FullName), [pair.Item2]);
+                    Machine new_machine = (Machine)Activator.CreateInstance(Type.GetType(machine_plugins[pair.Item1].FullName), [pair.Item2, this.configuration.GetRequiredSection(machine_plugins[pair.Item1].Name)]);
                     machines.Add(new_machine);
                     //new_machine.Name = pair.Item2;
                 }

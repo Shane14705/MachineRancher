@@ -40,20 +40,25 @@ foreach (var plugin in machine_plugins)
     var current_section = config.GetSection(plugin.Name);
     if (current_section.Exists())
     {
-        
-        if (current_section.GetValue<string>("DiscoveryTopic") == null)
-        {
-            logger.LogError(plugin.Name + " plugin does not have a DiscoveryTopic configured in its section in appsettings.ini. See the information on Machine Plugin requirements.");
-            return;
-        }
-        else
-        {
-            logger.LogInformation("Discovered plugin and configuration for " + plugin.Name + " machine plugin.");
-        }
+        logger.LogInformation("Discovered plugin and configuration for " + plugin.Name + " machine plugin.");
     }
     else
     {
-        logger.LogError("Could not find a matching configuration section for " + plugin.Name + " plugin.");
+        logger.LogError("Could not find a matching configuration section for " + plugin.Name + " machine plugin.");
+        return;
+    }
+}
+
+foreach (var plugin in interface_plugins)
+{
+    var current_section = config.GetSection(plugin.Name);
+    if (current_section.Exists())
+    {
+        logger.LogInformation("Discovered plugin and configuration for " + plugin.Name + " interface plugin.");
+    }
+    else
+    {
+        logger.LogError("Could not find a matching configuration section for " + plugin.Name + " interface plugin.");
         return;
     }
 }

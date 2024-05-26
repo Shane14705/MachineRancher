@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -70,9 +71,11 @@ namespace MachineRancher
         public abstract string Description { get; }
         //public abstract string Websocket { get; set; }
 
-        public Machine(string name)
+        protected IConfigurationSection config;
+        public Machine(string name, IConfigurationSection config)
         {
             this.Name = name;
+            this.config = config;
         }
     }
 }

@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Reflection;
+using Microsoft.Extensions.Configuration;
 
 namespace MachineRancher
 {
@@ -49,7 +50,7 @@ namespace MachineRancher
         private Dictionary<Machine, int> current_machines = new Dictionary<Machine, int>();
         private ILogger logger;
 
-        public HolographicClient(Guid websocket_id, SendClient send_func) : base(websocket_id, send_func)
+        public HolographicClient(Guid websocket_id, SendClient send_func, IConfigurationSection config) : base(websocket_id, send_func, config)
         {
             using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
             this.logger = factory.CreateLogger<HolographicClient>();

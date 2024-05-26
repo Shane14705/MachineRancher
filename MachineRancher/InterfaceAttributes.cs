@@ -5,6 +5,7 @@ using System.Threading.Channels;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 
 namespace MachineRancher
 {
@@ -48,12 +49,15 @@ namespace MachineRancher
         protected CancellationTokenSource CancellationTokenSource = new CancellationTokenSource();
         public CancellationToken main_token;
 
+        protected IConfigurationSection config;
+
         protected abstract Task MainLoop(CancellationToken token);
-        public Interface(Guid websocket_id, SendClient send_func)
+        public Interface(Guid websocket_id, SendClient send_func, IConfigurationSection config)
         {
             this.Websocket_ID = websocket_id;
             this.main_token = this.CancellationTokenSource.Token;
             this.SendClient = send_func;
+            this.config = config;
         }
 
         public void StartAsync()
