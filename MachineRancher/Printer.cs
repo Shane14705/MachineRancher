@@ -34,7 +34,7 @@ namespace MachineRancher
         public string Color { get => color; set => color = value; }
         public float Required_Nozzle_Size { get => required_nozzle_size; set => required_nozzle_size = value; }
         public bool Needs_Hardened_Nozzle { get => needs_hardened_nozzle; set => needs_hardened_nozzle = value; }
-        public float Weight { get => weight; set => weight = value; }
+        public float Current_Weight { get => weight; set => weight = value; }
     }
 
     internal class PrinterDigitalTwin
@@ -112,17 +112,23 @@ namespace MachineRancher
 
         private ILogger logger;
 
-        private PrinterDigitalTwin digitaltwin = null;
-
-        //[MonitorRegistration("Printers/*/moonraker/state/nozzle_size")]
-        //public float Nozzle_Size { get => nozzle_size; set => nozzle_size = value; } //Note: we can do averaging here, or do it in the mqtt monitor. Probably more efficient to do in the monitor
-
-        //private float nozzle_size;
+        public PrinterDigitalTwin digitaltwin = null;
 
         public Printer(string name) : base(name)
         {
             using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
             this.logger = factory.CreateLogger<Printer>();
+        }
+
+        //TODO: We can eventually have this function verify state uploads are successful by including a call to refresh_digitaltwin
+        public async Task UploadDigitalTwin(string json)
+        {
+            WatsonWsClient client = new WatsonWsClient(websocket_addr, websocket_port);
+            Random rand = new Random();
+            int request_id = rand.Next(0, 9999);
+        
+            await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.printer_state.set\", \"params\": \"" + json + "\", \"id\": " + request_id.ToString() + "}");
+
         }
 
         public async Task Send_Command(WatsonWsClient wsclient, string command)
@@ -447,11 +453,11 @@ namespace MachineRancher
                     conflicts.Add("Filament Type Mismatch: Print requires " + reqs.filament_type + " vs Current Type: " + digitaltwin.Current_Filament.Material_Name);
                 }
             }
-            if (reqs.filament_weight_total != float.NaN && digitaltwin.Current_Filament.Weight != float.NaN)
+            if (reqs.filament_weight_total != float.NaN && digitaltwin.Current_Filament.Current_Weight != float.NaN)
             {
-                if (reqs.filament_weight_total > digitaltwin.Current_Filament.Weight)
+                if (reqs.filament_weight_total > digitaltwin.Current_Filament.Current_Weight)
                 {
-                    conflicts.Add("Not Enough Filament: Print requires " + reqs.filament_weight_total + "kg vs Current Amount: " + digitaltwin.Current_Filament.Weight + "kg");
+                    conflicts.Add("Not Enough Filament: Print requires " + reqs.filament_weight_total + "kg vs Current Amount: " + digitaltwin.Current_Filament.Current_Weight + "kg");
                 }
             }
 

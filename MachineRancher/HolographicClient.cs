@@ -6,6 +6,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
+using System.Reflection;
 
 namespace MachineRancher
 {
@@ -280,6 +282,69 @@ namespace MachineRancher
 
                                     default:
                                         await send_client("No implementation of toggle_printing for this machine type");
+                                        break;
+
+                                }
+                            }
+                            break;
+                        }
+
+                        case "request_digitaltwin":
+                        {
+                            //Remark: Another spot where duplicate machine names can be problematic
+                            Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+
+                            if (target != null)
+                            {
+                                switch (target.GetType().Name)
+                                {
+                                    case ("Printer"):
+                                        Printer printer = (Printer)target;
+
+                                        Task.Run(async () =>
+                                        {
+                                            await printer.refresh_digitaltwin();
+                                            string info = JsonSerializer.Serialize<PrinterDigitalTwin>(printer.digitaltwin);
+
+                                            logger.LogInformation("Serialized printer digital twin: " + info);
+                                            await send_client("digitaltwin~" + printer.Name + "~" + info);
+                                        });
+                                        break;
+
+                                    default:
+                                        await send_client("No implementation of request_digitaltwin for this machine type");
+                                        break;
+
+                                }
+                            }
+                            break;
+                        }
+
+                        case "upload_state":
+                        {
+                            //Remark: Another spot where duplicate machine names can be problematic
+                            Machine target = this.current_machines.Keys.Where((machine) => { return machine.Name.Equals(args[1]); }).FirstOrDefault();
+
+                            if (target != null)
+                            {
+                                switch (target.GetType().Name)
+                                {
+                                    case ("Printer"):
+                                        Printer printer = (Printer)target;
+
+                                        Task.Run(async () =>
+                                        {
+                                            logger.LogInformation("Incoming upload state: " + args[2]);
+                                            await printer.UploadDigitalTwin(args[2]);
+                                            await printer.refresh_digitaltwin();
+
+                                            string info = JsonSerializer.Serialize<PrinterDigitalTwin>(printer.digitaltwin);
+                                            await send_client("digitaltwin~" + printer.Name + "~" + info);
+                                        });
+                                        break;
+
+                                    default:
+                                        await send_client("No implementation of upload_state for this machine type");
                                         break;
 
                                 }
