@@ -36,7 +36,7 @@ namespace MachineRancher
         public bool is_json;
         public string json_key;
 
-        private Object[] sample_list;
+        private List<Object> sample_list = new List<Object>();
         private int current_index = 0;
 
         /// <summary>
@@ -60,9 +60,16 @@ namespace MachineRancher
             {
                 this.current_index = 0;
             }
-
-            this.sample_list[this.current_index] = new_sample;
-            this.current_index++;
+        
+            if (this.sample_list.Count < samples_to_average)
+            {
+                this.sample_list.Add(new_sample);
+            }
+            else
+            {
+                this.sample_list[this.current_index] = new_sample;
+                this.current_index++;
+            }
 
             float output = 0;
             foreach (var item in this.sample_list)
@@ -70,7 +77,7 @@ namespace MachineRancher
                 output += (float)item;
             }
 
-            output /= this.sample_list.Length;
+            output /= this.sample_list.Count;
             return output;
         }
 
@@ -81,8 +88,15 @@ namespace MachineRancher
                 this.current_index = 0;
             }
 
-            this.sample_list[this.current_index] = new_sample;
-            this.current_index++;
+            if (this.sample_list.Count < samples_to_average)
+            {
+                this.sample_list.Add(new_sample);
+            }
+            else
+            {
+                this.sample_list[this.current_index] = new_sample;
+                this.current_index++;
+            }
 
             int output = 0;
             foreach (var item in this.sample_list)
@@ -90,7 +104,7 @@ namespace MachineRancher
                 output += (int)item;
             }
 
-            output /= this.sample_list.Length;
+            output /= this.sample_list.Count;
             return output;
         }
 

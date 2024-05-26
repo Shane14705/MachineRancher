@@ -529,6 +529,8 @@ namespace MachineRancher
                 {
                     log.WriteLine(DateTime.Now.ToString("MM_DD_yyyy_HH_mm_ss") + "," + this.Bed_Temperature + "," + this.Extruder_Temperature + "," + this.Fan_Speed);
 
+                    //TODO: IMPLEMENT ERROR DETECTION AND DATA VIZ GRAPH (read last x lines of log and send to hololens)
+
                     await Task.Delay(int.Parse(this.config["LoggingFrequency"]));
                 }
             }
