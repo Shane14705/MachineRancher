@@ -46,7 +46,7 @@ namespace MachineRancher
 
         public abstract Channel<Machine> SharedMachines { get; }
 
-        protected CancellationTokenSource CancellationTokenSource = new CancellationTokenSource();
+        public CancellationTokenSource CancellationTokenSource = new CancellationTokenSource();
         public CancellationToken main_token;
 
         protected IConfigurationSection config;
@@ -62,7 +62,7 @@ namespace MachineRancher
 
         public void StartAsync()
         {
-            Task.Run(() => this.MainLoop(this.main_token));
+            Task.Run(() => this.MainLoop(this.main_token), this.main_token);
         }
 
         /// <summary>

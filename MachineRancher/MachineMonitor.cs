@@ -116,7 +116,15 @@ namespace MachineRancher
 
             this.listen_server.ClientConnected += OnClientConnect;
             this.listen_server.MessageReceived += OnMessageReceived;
+            this.listen_server.ClientDisconnected += OnClientDisconnect;
 
+        }
+
+        private void OnClientDisconnect(object? sender, DisconnectionEventArgs e)
+        {
+            logger.LogInformation("Client disconnected! Cancelling client...");
+            clients[e.Client.Guid].CancellationTokenSource.Cancel();
+            clients.Remove(e.Client.Guid);
         }
 
         private async void OnMessageReceived(object? sender, MessageReceivedEventArgs e)
