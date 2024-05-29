@@ -100,7 +100,7 @@ namespace MachineRancher
                                             case ("Printer"):
                                                 Printer printer = (Printer)target;
 
-                                                Task.Run(async () =>
+                                                async void req_print()
                                                 {
                                                     (bool, string) output = await printer.TryPrint(args[2]);
                                                     if (output.Item1)
@@ -113,7 +113,8 @@ namespace MachineRancher
                                                     {
                                                         await send_client("notification~Unable to Print!~" + output.Item2);
                                                     }
-                                                });
+                                                };
+                                                Task.Run(req_print);
                                                 break;
 
                                             default:
@@ -135,7 +136,7 @@ namespace MachineRancher
                                         switch (target.GetType().Name)
                                         {
                                             case ("Printer"):
-                                                current_machines[target] = (int)PRINTER_UI_STATE.Print_Menu;
+                                                //current_machines[target] = (int)PRINTER_UI_STATE.Print_Menu;
                                                 Printer printer = (Printer)target;
                                                 Task.Run(async () =>
                                                 {
@@ -203,25 +204,29 @@ namespace MachineRancher
                                             case ("Printer"):
                                                 Printer printer = (Printer)target;
                                                 PRINTER_UI_STATE printer_interface_state = (PRINTER_UI_STATE)this.current_machines[target];
-
+                                                logger.LogInformation("Current state of " + printer.Name + "=" + this.current_machines[target].ToString());
                                                 if (args[0].Equals("advance"))
                                                 {
                                                     switch (printer_interface_state)
                                                     {
                                                         case PRINTER_UI_STATE.Status:
-                                                            current_machines[target] = (int)PRINTER_UI_STATE.Leveling;
+                                                            logger.LogInformation("Previous state: status, switching to leveling");
+                                                            this.current_machines[target] = (int)PRINTER_UI_STATE.Leveling;
                                                             break;
 
                                                         case PRINTER_UI_STATE.Leveling:
-                                                            current_machines[target] = (int)PRINTER_UI_STATE.Confirmation;
+                                                            logger.LogInformation("Previous state: leveling, switching to confirmation");
+                                                            this.current_machines[target] = (int)PRINTER_UI_STATE.Confirmation;
                                                             break;
 
                                                         case PRINTER_UI_STATE.Confirmation:
-                                                            current_machines[target] = (int)PRINTER_UI_STATE.Print_Menu;
+                                                            logger.LogInformation("Previous state: confirmation, switching to menu");
+                                                            this.current_machines[target] = (int)PRINTER_UI_STATE.Print_Menu;
                                                             break;
 
                                                         case PRINTER_UI_STATE.Print_Menu:
-                                                            current_machines[target] = (int)PRINTER_UI_STATE.Status;
+                                                            logger.LogInformation("Previous state: menu, switching to status");
+                                                            this.current_machines[target] = (int)PRINTER_UI_STATE.Status;
                                                             break;
                                                     }
                                                 }
@@ -230,19 +235,19 @@ namespace MachineRancher
                                                     switch (printer_interface_state)
                                                     {
                                                         case PRINTER_UI_STATE.Leveling:
-                                                            current_machines[target] = (int)PRINTER_UI_STATE.Status;
+                                                            this.current_machines[target] = (int)PRINTER_UI_STATE.Status;
                                                             break;
 
                                                         case PRINTER_UI_STATE.Confirmation:
-                                                            current_machines[target] = (int)PRINTER_UI_STATE.Leveling;
+                                                            this.current_machines[target] = (int)PRINTER_UI_STATE.Leveling;
                                                             break;
 
                                                         case PRINTER_UI_STATE.Print_Menu:
-                                                            current_machines[target] = (int)PRINTER_UI_STATE.Confirmation;
+                                                            this.current_machines[target] = (int)PRINTER_UI_STATE.Confirmation;
                                                             break;
                                                     }
                                                 }
-                                                await send_client("login_state~" + printer.Name + "~" + printer.Printer_State + "~" + current_machines[target].ToString());
+                                                await send_client("login_state~" + printer.Name + "~" + printer.Printer_State + "~" + this.current_machines[target].ToString());
 
 
                                                 //switch (printer.printer_state)
@@ -304,15 +309,14 @@ namespace MachineRancher
                                         {
                                             case ("Printer"):
                                                 Printer printer = (Printer)target;
-
-                                                Task.Run(async () =>
-                                                {
+                                                async void temp() {
                                                     await printer.refresh_digitaltwin();
                                                     string info = JsonSerializer.Serialize<PrinterDigitalTwin>(printer.digitaltwin);
 
                                                     logger.LogInformation("Serialized printer digital twin: " + info);
                                                     await send_client("digitaltwin~" + printer.Name + "~" + info);
-                                                });
+                                                };
+                                                Task.Run(temp);
                                                 break;
 
                                             default:

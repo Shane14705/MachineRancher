@@ -159,9 +159,10 @@ namespace MachineRancher
 
         private void deserialize_digitaltwin(string json)
         {
-            logger.LogInformation(json);
+            //logger.LogInformation(json);
+            //logger.LogInformation(JsonSerializer.Deserialize<Dictionary<string, object>>(json)["result"].ToString());
             this.digitaltwin = JsonSerializer.Deserialize<PrinterDigitalTwin>(
-                JsonSerializer.Deserialize<Dictionary<string, string>>(json)["result"]
+                JsonSerializer.Deserialize<Dictionary<string, object>>(json)["result"].ToString()
                 );
         }
 
@@ -216,20 +217,21 @@ namespace MachineRancher
         /// <returns>Float representing the number of rotations to be done to the given screw. Negative values represent counter-clockwise rotation, and positive represents clockwise.</returns>
         private float string_to_rotations(string adjustment)
         {
-            string[] values = adjustment.Split(':');
-            if (values.Length != 2) 
+            string[] values = adjustment.Substring(0, adjustment.Length - 3).Split(' ');
+            if (values.Length != 3)
             {
                 logger.LogError("Unexpected bed level screw adjustment string: " + adjustment);
                 return 0;
             }
 
             float output = 0;
+            //logger.LogInformation(adjustment);
+            string[] temp = values[2].Split(':');
+            output += float.Parse(temp[0]);
 
-            output += float.Parse(values[0]);
+            output += (float.Parse(temp[1]) / 60);
 
-            output += (float.Parse(values[1]) / 60);
-
-            if (adjustment.Contains("CCW"))
+            if (adjustment[1].Equals("CCW"))
             {
                 output *= -1;
             }
@@ -254,7 +256,7 @@ namespace MachineRancher
                 {
                     foreach (Match match in regex.Matches(msg))
                     {
-                        ret.Add(match.Groups[0].Value);
+                        ret.Add(match.Groups[0].Value.Split(": \"")[1]);
                     }
                     response_received = true;
                 }
@@ -294,54 +296,58 @@ namespace MachineRancher
 
             currently_leveling = true;
             WatsonWsClient client = new WatsonWsClient(this.websocket);
+            
+            Dictionary<string, float> leveling_info = new Dictionary<string, float>();
+            void handler(object? sender, MessageReceivedEventArgs message)
+            {
+                //logger.LogInformation("message received!");
+                if (message.Data != null && message.Data.Count > 0)
+                {
+                    string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
+                    //logger.LogInformation(msg);
+                    if (msg.Contains("screw")) //TODO: Eventually, make this work for non-standard screw names? https://www.klipper3d.org/Manual_Level.html#adjusting-bed-leveling-screws-using-the-bed-probe
+                    {
+                        if (msg.Contains("front left"))
+                        {
+                            leveling_info["front left"] = 0f;
+
+                        }
+                        if (msg.Contains("front right"))
+                        {
+                            string val = msg.Substring(msg.LastIndexOf(" : ") + 2).Trim();
+                            leveling_info["front right"] = string_to_rotations(val);
+
+                        }
+                        if (msg.Contains("rear right"))
+                        {
+                            string val = msg.Substring(msg.LastIndexOf(" : ") + 2).Trim();
+                            leveling_info["rear right"] = string_to_rotations(val);
+
+                        }
+                        if (msg.Contains("rear left"))
+                        {
+                            string val = msg.Substring(msg.LastIndexOf(" : ") + 2).Trim();
+                            leveling_info["rear left"] = string_to_rotations(val);
+
+                        }
+                    }
+                }
+            };
+            client.MessageReceived += handler;
+                
+
             client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
-            logger.LogInformation("Connected to " + this.name + "!");
+            //logger.LogInformation("Connected to " + this.name + "!");
 
             await Send_Command(client, "G28");
             await Send_Command(client, "SCREWS_TILT_CALCULATE");
-            Dictionary<string, float> leveling_info = new Dictionary<string, float>();
-
-            client.MessageReceived += (sender, message) =>
-                {
-                    if (message.Data != null && message.Data.Count > 0)
-                    {
-                        string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
-                        if (msg.Contains("screw")) //TODO: Eventually, make this work for non-standard screw names? https://www.klipper3d.org/Manual_Level.html#adjusting-bed-leveling-screws-using-the-bed-probe
-                        {
-                            if (msg.Contains("front left"))
-                            {
-                                leveling_info["front left"] = 0f;
-                                return;
-                            }
-                            if (msg.Contains("front right"))
-                            {
-                                string val = msg.Substring(msg.LastIndexOf(" : ") + 2).Trim();
-                                leveling_info["front right"] = string_to_rotations(val);
-                                return;
-                            }
-                            if (msg.Contains("rear right"))
-                            {
-                                string val = msg.Substring(msg.LastIndexOf(" : ") + 2).Trim();
-                                leveling_info["rear right"] = string_to_rotations(val);
-                                return;
-                            }
-                            if (msg.Contains("rear left"))
-                            {
-                                string val = msg.Substring(msg.LastIndexOf(" : ") + 2).Trim();
-                                leveling_info["rear left"] = string_to_rotations(val);
-                                return;
-                            }
-                        }
-                    }
-                };
 
             var tokenSource = new CancellationTokenSource();
             var token = tokenSource.Token;
             var waitTask = Task.Run((async () =>
             {
-                while (leveling_info.Count != 4)
+                while (!token.IsCancellationRequested && leveling_info.Count != 4)
                 {
-                    token.ThrowIfCancellationRequested();
                     await Task.Delay(1000, token);
                 }
             }), tokenSource.Token);
@@ -353,6 +359,7 @@ namespace MachineRancher
             }
 
             currently_leveling = false;
+            client.MessageReceived -= handler;
             await client.StopAsync();
 
             return leveling_info;
@@ -385,13 +392,13 @@ namespace MachineRancher
         struct PrintRequirements
         {
             public float nozzle_diameter { get => requested_diameter; set => requested_diameter = (float)Math.Floor(value * 10) / 10; }
-            private float requested_diameter = float.NaN;
+            private float requested_diameter = 0;
 
             public string filament_type { get => filament_name; set => filament_name = value; }
             private string filament_name = String.Empty;
 
             public float filament_weight_total { get => weight_required; set => weight_required = value; }
-            private float weight_required = float.NaN;
+            private float weight_required = 0;
 
             public PrintRequirements()
             {
@@ -413,7 +420,7 @@ namespace MachineRancher
                 {
                     logger.LogInformation(msg);
                     new_reqs = JsonSerializer.Deserialize<PrintRequirements>(
-                        JsonSerializer.Deserialize<Dictionary<string, string>>(msg)["result"]
+                        JsonSerializer.Deserialize<Dictionary<string, object>>(msg)["result"].ToString()
                         );
 
                     response_received = true;
@@ -448,7 +455,7 @@ namespace MachineRancher
             (bool, string) result = (false, string.Empty);
             List<string> conflicts = new List<string>();
 
-            if (reqs.nozzle_diameter != float.NaN && digitaltwin.Nozzle_Size != float.NaN) 
+            if (reqs.nozzle_diameter != float.NaN && digitaltwin.Nozzle_Size != 0) 
             {
                 if (reqs.nozzle_diameter != digitaltwin.Nozzle_Size)
                 {
@@ -463,7 +470,7 @@ namespace MachineRancher
                     conflicts.Add("Filament Type Mismatch: Print requires " + reqs.filament_type + " vs Current Type: " + digitaltwin.Current_Filament.Material_Name);
                 }
             }
-            if (reqs.filament_weight_total != float.NaN && digitaltwin.Current_Filament.Current_Weight != float.NaN)
+            if (reqs.filament_weight_total != float.NaN && digitaltwin.Current_Filament.Current_Weight != 0)
             {
                 if (reqs.filament_weight_total > digitaltwin.Current_Filament.Current_Weight)
                 {
@@ -510,7 +517,7 @@ namespace MachineRancher
                         logging_token.Cancel();
                     }
                     logging_token = new CancellationTokenSource();
-                    string log_name = filename + "_" + DateTime.Now.ToString("MM_DD_yyyy_HH_mm_ss");
+                    string log_name = filename + "_" + DateTime.Now.ToString("MM_DD_yyyy_HH_mm_ss") + ".txt";
                     Task.Run(async () => await log_machine(logging_token.Token, filename));
                 }
                 
@@ -520,6 +527,7 @@ namespace MachineRancher
             return result;
         }
 
+        //TODO: DEBUG LOGGING, MAKE SURE IT WORKS
         private async Task log_machine(CancellationToken token, string filename)
         {
             using (StreamWriter log = new StreamWriter(Path.Combine(this.config["LogFolderPath"], filename)))
