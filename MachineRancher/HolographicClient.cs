@@ -452,7 +452,27 @@ namespace MachineRancher
             }
             finally
             {
+                unregister_events();
                 logger.LogInformation("Holographic Interface client canceled.");
+            }
+        }
+
+        //REMARK: This function is where we should implement any machine specific cleanup
+        private void unregister_events()
+        {
+            foreach (Machine machine in this.current_machines.Keys)
+            {
+                switch (machine.GetType().Name)
+                {
+                    case ("Printer"):
+                        Printer printer = (Printer)machine;
+
+                        printer.onPrintFailureDetected -= onPrinterFailureDetected;
+                        break;
+
+                    default:
+                        break;
+                }
             }
         }
 
@@ -470,6 +490,7 @@ namespace MachineRancher
                         {
                             logger.LogInformation("Beginning sending status updates to holographic client.");
                             Printer printer = (Printer)new_machine;
+                            printer.onPrintFailureDetected += onPrinterFailureDetected;
                             await send_client("machine_confirmed~" + printer.Name);
                             //Start sending status updates
                             //Remark: Main flaw here is the use of the main token, meaning that we cannot shut off status updates for individual machines unless we kill the entire client
@@ -494,5 +515,10 @@ namespace MachineRancher
             }
         }
 
+        //TODO: IMPLEMENT THIS USING VIZ_DATA, LOG, SEND NOTIFICATION, ETC.
+        private void onPrinterFailureDetected(Printer failed_machne, string log_file)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

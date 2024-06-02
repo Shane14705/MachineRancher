@@ -209,7 +209,6 @@ namespace MachineRancher
             await Monitor();
         }
 
-        //TODO: When we discover a new printer, we need to check all of its attributes to subscribe it to specific values
         public async Task<List<Machine>> DiscoverMachines()
         {
             Regex regex = new Regex(@"^(([^/]*)\/([^/]*))\/");
@@ -377,8 +376,7 @@ namespace MachineRancher
                     await managedMqttClient.SubscribeAsync(topic);
                     
                 }
-                //REMINDER: NEED TO ADJUST WEBSOCKET TOPIC TO BE JSON AND STRING OF "IP:PORT", ALSO NEED TO MAKE ALL OTHER TOPICS BE JSON AS WELL (LIKE NOZZLE SIZE)
-                //TODO: TOMORROW, WE IMPLEMENT FUNCTIONS (ie: printer leveling)
+
                 while (true) await Task.Delay(500);
 
             }

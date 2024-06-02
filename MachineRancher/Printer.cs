@@ -60,6 +60,8 @@ namespace MachineRancher
         Error
     };
 
+    //TODO: TURN ALL WEBSOCKET USES IN HERE TO REFERENCE ONE WEBSOCKET INSTANCE THAT ONLY GETS CLOSED OR OPENED WHEN NO OPERATIONS ARE USING IT
+
     [DiscoveryTopic("Printers/#")]
     internal class Printer : Machine
     {
@@ -113,6 +115,11 @@ namespace MachineRancher
 
         public PrinterDigitalTwin digitaltwin = null;
 
+        private string current_logfile = String.Empty;
+
+        public delegate void handleFailureDetection(Printer failed_machne, string log_file);
+        public event handleFailureDetection onPrintFailureDetected;
+
         public Printer(string name, IConfigurationSection config) : base(name, config)
         {
             using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
@@ -146,10 +153,29 @@ namespace MachineRancher
             switch (printer_state)
             {
                 case PrinterState.Printing:
+                    if (logging_token != null)
+                    {
+                        logging_token.Cancel();
+                        logging_token = null;
+                    }
                     await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.pause\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
+
                     break;
 
                 case PrinterState.Paused:
+                    if (logging_token != null)
+                    {
+                        logging_token.Cancel();
+                        logging_token = null;
+                    }
+                    
+                    if (current_logfile != null)
+                    {
+                        logging_token = new CancellationTokenSource();
+                        isHeated = !(Bed_Temperature < digitaltwin.Current_Filament.Bed_Temp || Extruder_Temperature < digitaltwin.Current_Filament.Printing_Temp);
+                        Task.Run(async () => await log_machine(logging_token.Token, current_logfile));
+                    }
+                    
                     await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.resume\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
                     break;
             }
@@ -375,6 +401,12 @@ namespace MachineRancher
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.cancel\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
 
             await client.StopAsync();
+            if (logging_token != null)
+            {
+                logging_token.Cancel();
+                logging_token = null;
+                current_logfile = String.Empty;
+            }
         }
 
         public async Task EStop()
@@ -387,6 +419,12 @@ namespace MachineRancher
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.emergency_stop\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
 
             await client.StopAsync();
+            if (logging_token != null)
+            {
+                logging_token.Cancel();
+                logging_token = null;
+                current_logfile = String.Empty;
+            }
         }
 
         struct PrintRequirements
@@ -493,7 +531,8 @@ namespace MachineRancher
 
         }
 
-        private CancellationTokenSource logging_token;
+        private CancellationTokenSource logging_token = null;
+        private bool isHeated = false;
         public async Task<(bool, string)> TryPrint(string filename)
         {
             PrintRequirements reqs = await GetPrintRequirements(filename);
@@ -515,10 +554,13 @@ namespace MachineRancher
                     if (logging_token != null)
                     {
                         logging_token.Cancel();
+                        current_logfile = String.Empty;
                     }
                     logging_token = new CancellationTokenSource();
-                    string log_name = filename + "_" + DateTime.Now.ToString("MM_DD_yyyy_HH_mm_ss") + ".txt";
-                    Task.Run(async () => await log_machine(logging_token.Token, filename));
+                    current_logfile = filename.Substring(0, filename.Length - 6) + "_" + DateTime.Now.ToString("MM_dd_yyyy_HH_mm_ss") + ".csv";
+
+                    isHeated = !(Bed_Temperature < digitaltwin.Current_Filament.Bed_Temp || Extruder_Temperature < digitaltwin.Current_Filament.Printing_Temp);
+                    Task.Run(async () => await log_machine(logging_token.Token, current_logfile));
                 }
                 
                 await client.StopAsync();
@@ -527,18 +569,32 @@ namespace MachineRancher
             return result;
         }
 
-        //TODO: DEBUG LOGGING, MAKE SURE IT WORKS
         private async Task log_machine(CancellationToken token, string filename)
         {
-            using (StreamWriter log = new StreamWriter(Path.Combine(this.config["LogFolderPath"], filename)))
-            {
+            using (StreamWriter log = File.AppendText(Path.Combine(this.config["LogFolderPath"], filename)))
+            {   
                 while (!token.IsCancellationRequested && this.printer_state == PrinterState.Printing)
                 {
-                    log.WriteLine(DateTime.Now.ToString("MM_DD_yyyy_HH_mm_ss") + "," + this.Bed_Temperature + "," + this.Extruder_Temperature + "," + this.Fan_Speed);
+                    log.WriteLine(DateTime.Now.ToString("MM_dd_yyyy_HH_mm_ss") + "," + this.Bed_Temperature + "," + this.Extruder_Temperature + "," + this.Fan_Speed);
 
-                    //TODO: IMPLEMENT ERROR DETECTION AND DATA VIZ GRAPH (read last x lines of log and send to hololens)
+                    if (!isHeated && (this.Extruder_Temperature >= digitaltwin.Current_Filament.Printing_Temp) && (this.Bed_Temperature >= digitaltwin.Current_Filament.Bed_Temp))
+                    {
+                        isHeated = true;
+                    }
 
-                    await Task.Delay(int.Parse(this.config["LoggingFrequency"]));
+                    if (isHeated)
+                    {
+                        //TODO: IMPLEMENT ERROR DETECTION AND DATA VIZ GRAPH (read last x lines of log and send to hololens)
+                        if ((Math.Abs(digitaltwin.Current_Filament.Bed_Temp - this.Bed_Temperature) > int.Parse(this.config["TemperatureNominalFluctuationDegrees"])) ||
+                            (Math.Abs(digitaltwin.Current_Filament.Printing_Temp - this.Extruder_Temperature) > int.Parse(this.config["TemperatureNominalFluctuationDegrees"])))
+                        {
+                            //ERROR DETECTED, WE KNOW PRINTER MUST NOT BE PAUSED SINCE WE DONT LOG DURING PAUSE. SO WE PAUSE PRINT AND ALERT USER
+                            await Toggle_Printing();
+                            onPrintFailureDetected?.Invoke(this, filename);
+                            break;
+                        }
+                    }
+                    await Task.Delay(int.Parse(this.config["LoggingFrequency"]), token);
                 }
             }
         }

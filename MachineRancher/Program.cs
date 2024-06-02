@@ -6,8 +6,6 @@ using Microsoft.Extensions.Logging;
 using System.Reflection;
 
 
-//TODO: Load machine plugins first, then connect to mqtt once .
-
 var machine_plugins = AppDomain.CurrentDomain.GetAssemblies()
         .SelectMany(assembly => assembly.GetTypes())
         .Where(type => type.IsSubclassOf(typeof(Machine)))
