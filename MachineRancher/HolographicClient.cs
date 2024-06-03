@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Reflection;
 using Microsoft.Extensions.Configuration;
+using System.Collections.Immutable;
 
 namespace MachineRancher
 {
@@ -111,7 +112,8 @@ namespace MachineRancher
                                                     }
                                                     else
                                                     {
-                                                        await send_client("notification~Unable to Print!~" + output.Item2);
+                                                        await SendNotification("Unable to Print!", output.Item2);
+                                                        //await send_client("notification~Unable to Print!~" + output.Item2);
                                                     }
                                                 };
                                                 Task.Run(req_print);
@@ -476,6 +478,22 @@ namespace MachineRancher
             }
         }
 
+        private async Task SendNotification(string title, string message)
+        {
+            await SendNotification(title, message, null);
+        }
+
+        private async Task SendNotification(string title, string message, string button_text)
+        {
+            string command = "notification~" + title + "~" + message;
+            if (button_text != null)
+            {
+                command += "~" + button_text;
+            }
+
+            await SendClient(command);
+        }
+
         private async Task<bool> RequestMachine(string machine_name, CancellationToken token)
         {
             to_server.Writer.TryWrite(machine_name);
@@ -516,9 +534,31 @@ namespace MachineRancher
         }
 
         //TODO: IMPLEMENT THIS USING VIZ_DATA, LOG, SEND NOTIFICATION, ETC.
-        private void onPrinterFailureDetected(Printer failed_machne, string log_file)
+        private async void onPrinterFailureDetected(Printer failed_machne, List<List<float>> data)
         {
-            throw new NotImplementedException();
+            this.send_client("stat_update~" + failed_machne.Name + "~" + failed_machne.Bed_Temperature.ToString() + "~" + failed_machne.Extruder_Temperature.ToString() + "~" + failed_machne.Fan_Speed + "~" + failed_machne.Printer_State);
+            int samples_per_point = Math.Clamp((data.Count / int.Parse(this.config["VisGraphNumPoints"])), 1, int.MaxValue);
+
+            string vis_command = "vis_data~" + failed_machne.Name + "~";
+            
+            //TODO: NEED TO FIX: Sometimes averaging comes out weird due to remainders (ie: 10 chunks of n size, 1 chunk of n-1 size)
+            foreach (List<float>[] dataset in data.Chunk(samples_per_point))
+            {
+                List<float> current_frame = new List<float>();
+                for (int i = 0; i < dataset[0].Count; i++)
+                {
+                    current_frame.Add(dataset.Average(row => row[i]));
+                }
+                vis_command += (String.Join(',', current_frame) + "~");
+            }
+            vis_command.TrimEnd('~');
+
+            await SendNotification("Failure Detected!", "A possible failure has been detected at " + failed_machne.Name + " so the print has been paused and a visualization of recent data has been posted. Please investigate.");
+
+            await SendClient(vis_command);
+
+            
+            
         }
     }
 }

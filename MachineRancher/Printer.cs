@@ -117,7 +117,7 @@ namespace MachineRancher
 
         private string current_logfile = String.Empty;
 
-        public delegate void handleFailureDetection(Printer failed_machne, string log_file);
+        public delegate void handleFailureDetection(Printer failed_machne, List<List<float>> sample_frames);
         public event handleFailureDetection onPrintFailureDetected;
 
         public Printer(string name, IConfigurationSection config) : base(name, config)
@@ -172,6 +172,7 @@ namespace MachineRancher
                     if (current_logfile != null)
                     {
                         logging_token = new CancellationTokenSource();
+                        await refresh_digitaltwin();
                         isHeated = !(Bed_Temperature < digitaltwin.Current_Filament.Bed_Temp || Extruder_Temperature < digitaltwin.Current_Filament.Printing_Temp);
                         Task.Run(async () => await log_machine(logging_token.Token, current_logfile));
                     }
@@ -571,8 +572,11 @@ namespace MachineRancher
 
         private async Task log_machine(CancellationToken token, string filename)
         {
+            await refresh_digitaltwin();
+            bool failureDetected = false;
             using (StreamWriter log = File.AppendText(Path.Combine(this.config["LogFolderPath"], filename)))
-            {   
+            {
+                //log.WriteLine("TIME,BED TEMP,EXTRUDER TEMP,FAN SPEED");
                 while (!token.IsCancellationRequested && this.printer_state == PrinterState.Printing)
                 {
                     log.WriteLine(DateTime.Now.ToString("MM_dd_yyyy_HH_mm_ss") + "," + this.Bed_Temperature + "," + this.Extruder_Temperature + "," + this.Fan_Speed);
@@ -584,18 +588,45 @@ namespace MachineRancher
 
                     if (isHeated)
                     {
-                        //TODO: IMPLEMENT ERROR DETECTION AND DATA VIZ GRAPH (read last x lines of log and send to hololens)
                         if ((Math.Abs(digitaltwin.Current_Filament.Bed_Temp - this.Bed_Temperature) > int.Parse(this.config["TemperatureNominalFluctuationDegrees"])) ||
                             (Math.Abs(digitaltwin.Current_Filament.Printing_Temp - this.Extruder_Temperature) > int.Parse(this.config["TemperatureNominalFluctuationDegrees"])))
                         {
                             //ERROR DETECTED, WE KNOW PRINTER MUST NOT BE PAUSED SINCE WE DONT LOG DURING PAUSE. SO WE PAUSE PRINT AND ALERT USER
                             await Toggle_Printing();
-                            onPrintFailureDetected?.Invoke(this, filename);
+                            failureDetected = true;
+                            await log.FlushAsync();
                             break;
                         }
                     }
                     await Task.Delay(int.Parse(this.config["LoggingFrequency"]), token);
                 }
+            }
+
+            if (failureDetected)
+            {
+                var samples_to_average = File.ReadLines(Path.Combine(this.config["LogFolderPath"], filename)).TakeLast(
+                    (int) Math.Floor(
+                        (int.Parse(this.config["SampleMinutesOnFailure"]) * (60000 / (float.Parse(this.config["LoggingFrequency"]))))
+                    )
+                );
+
+                List<List<float>> rows = new List<List<float>>();
+                foreach ( var row in samples_to_average )
+                {
+                    var temp = row.Split(',');
+                    List<float> new_row = new List<float>();
+                    foreach ( var column in temp )
+                    {
+                        float output;
+                        if (float.TryParse(column, out output))
+                        {
+                            new_row.Add(output);
+                        }
+                    }
+                    rows.Add(new_row);
+                }
+
+                onPrintFailureDetected?.Invoke(this, rows);
             }
         }
             
