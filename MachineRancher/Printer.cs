@@ -602,6 +602,7 @@ namespace MachineRancher
                 {
                     log.WriteLine(DateTime.Now.ToString("MM_dd_yyyy_HH_mm_ss") + "," + this.Bed_Temperature + "," + this.Extruder_Temperature + "," + this.Fan_Speed);
 
+                    //TODO: Add support for First Layer Temp which is different from printing temp
                     if (!isHeated && (this.Extruder_Temperature >= digitaltwin.Current_Filament.Printing_Temp) && (this.Bed_Temperature >= digitaltwin.Current_Filament.Bed_Temp))
                     {
                         isHeated = true;
