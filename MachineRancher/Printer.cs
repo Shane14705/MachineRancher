@@ -89,14 +89,14 @@ namespace MachineRancher
         [MonitorRegistration("Printers/*/moonraker/status/connections", "websocket")]
         public string Websocket
         {
-            get
-            {
+            //get
+            //{
 
-                return websocket.Host.ToString() + ":" + websocket.Port.ToString();
-            }
+            //    return websocket.Host.ToString() + ":" + websocket.Port.ToString();
+            //}
             set
             {
-                websocket = new Uri("ws://" + value + "/websocket");
+                _websocket_client = new WatsonWsClient(new Uri("ws://" + value + "/websocket"));
             }
         }
 
@@ -109,7 +109,35 @@ namespace MachineRancher
 
         public PrinterState printer_state;
 
-        private Uri websocket = null;
+        private WatsonWsClient _websocket_client = null;
+
+        private CountdownEvent socket_access_lock = new CountdownEvent(0);
+
+        private WatsonWsClient acquire_client()
+        {
+            if (socket_access_lock.IsSet)
+            {
+                socket_access_lock.AddCount();
+                _websocket_client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
+            }
+            else
+            {
+                socket_access_lock.AddCount();
+            }
+            return _websocket_client;
+        }
+        private bool release_client()
+        {
+            if (socket_access_lock.Signal())
+            {
+                _websocket_client.Stop();
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
 
         private ILogger logger;
 
@@ -129,14 +157,13 @@ namespace MachineRancher
         //TODO: We can eventually have this function verify state uploads are successful by including a call to refresh_digitaltwin
         public async Task UploadDigitalTwin(string json)
         {
-            WatsonWsClient client = new WatsonWsClient(this.websocket);
-            client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
+            WatsonWsClient client = acquire_client();
             Random rand = new Random();
             int request_id = rand.Next(0, 9999);
         
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.printer_state.set\", \"params\": \"" + json + "\", \"id\": " + request_id.ToString() + "}");
 
-            await client.StopAsync();
+            release_client();
         }
 
         public async Task Send_Command(WatsonWsClient wsclient, string command)
@@ -148,8 +175,7 @@ namespace MachineRancher
         public async Task Toggle_Printing()
         {
             Random rand = new Random();
-            WatsonWsClient client = new WatsonWsClient(this.websocket);
-            client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
+            WatsonWsClient client = acquire_client();
             switch (printer_state)
             {
                 case PrinterState.Printing:
@@ -181,7 +207,7 @@ namespace MachineRancher
                     break;
             }
 
-            await client.StopAsync();
+            release_client();
         }
 
         private void deserialize_digitaltwin(string json)
@@ -195,21 +221,21 @@ namespace MachineRancher
 
         public async Task<bool> refresh_digitaltwin()
         {
-            WatsonWsClient client = new WatsonWsClient(this.websocket);
-            client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
+            WatsonWsClient client = acquire_client();
             Random rand = new Random();
             int request_id = rand.Next(0, 9999);
             bool response_received = false;
-            client.MessageReceived += (sender, message) =>
-            {
-                string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
-                if (msg.Contains("\"id\": " + request_id.ToString()))
-                {
-                    deserialize_digitaltwin(msg);
+            EventHandler<MessageReceivedEventArgs> message_handler = (sender, message) =>
+                        {
+                            string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
+                            if (msg.Contains("\"id\": " + request_id.ToString()))
+                            {
+                                deserialize_digitaltwin(msg);
 
-                    response_received = true;
-                }
-            };
+                                response_received = true;
+                            }
+                        };
+            client.MessageReceived += message_handler;
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.printer_state.get\", \"id\": " + request_id.ToString() + "}");
 
             var tokenSource = new CancellationTokenSource();
@@ -227,12 +253,14 @@ namespace MachineRancher
             {
                 tokenSource.Cancel();
                 logger.LogWarning("Digital twin retrieval timed out!");
-                await client.StopAsync();
+                client.MessageReceived -= message_handler;
+                release_client();
                 return false;
             }
             else
             {
-                await client.StopAsync();
+                client.MessageReceived -= message_handler;
+                release_client();
                 return true;
             }
         }
@@ -272,22 +300,22 @@ namespace MachineRancher
             Regex regex = new Regex("\"path\": \"([^\"]+)");
             bool response_received = false;
             List<string> ret = new List<string>();
-            WatsonWsClient client = new WatsonWsClient(this.websocket);
-            client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
+            WatsonWsClient client = acquire_client();
             Random rand = new Random();
             int request_id = rand.Next(0, 9999);
-            client.MessageReceived += (sender, message) =>
-            {
-                string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
-                if (msg.Contains("\"id\": " + request_id.ToString()))
-                {
-                    foreach (Match match in regex.Matches(msg))
-                    {
-                        ret.Add(match.Groups[0].Value.Split(": \"")[1]);
-                    }
-                    response_received = true;
-                }
-            };
+            EventHandler<MessageReceivedEventArgs> message_handler = (sender, message) =>
+                        {
+                            string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
+                            if (msg.Contains("\"id\": " + request_id.ToString()))
+                            {
+                                foreach (Match match in regex.Matches(msg))
+                                {
+                                    ret.Add(match.Groups[0].Value.Split(": \"")[1]);
+                                }
+                                response_received = true;
+                            }
+                        };
+            client.MessageReceived += message_handler;
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"server.files.list\",\"params\": { \"root\": \"" + "gcodes" + "\"}, \"id\": " + request_id.ToString() + "}");
 
             var tokenSource = new CancellationTokenSource();
@@ -307,7 +335,8 @@ namespace MachineRancher
                 logger.LogWarning("Printable file list retrieval timed out!");
             }
 
-            await client.StopAsync();
+            client.MessageReceived -= message_handler;
+            release_client();
             return ret;
 
         }
@@ -315,14 +344,8 @@ namespace MachineRancher
         private bool currently_leveling = false;
         public async Task<Dictionary<string, float>?> LevelBed()
         {
-            if (websocket == null)
-            {
-                logger.LogCritical("No websocket available!");
-                return null;
-            }
-
             currently_leveling = true;
-            WatsonWsClient client = new WatsonWsClient(this.websocket);
+            WatsonWsClient client = acquire_client();
             
             Dictionary<string, float> leveling_info = new Dictionary<string, float>();
             void handler(object? sender, MessageReceivedEventArgs message)
@@ -363,7 +386,7 @@ namespace MachineRancher
             client.MessageReceived += handler;
                 
 
-            client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
+            //client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
             //logger.LogInformation("Connected to " + this.name + "!");
 
             await Send_Command(client, "G28");
@@ -387,7 +410,7 @@ namespace MachineRancher
 
             currently_leveling = false;
             client.MessageReceived -= handler;
-            await client.StopAsync();
+            release_client();
 
             return leveling_info;
  
@@ -396,12 +419,11 @@ namespace MachineRancher
         public async Task Cancel_Print()
         {
             Random rand = new Random();
-            WatsonWsClient client = new WatsonWsClient(this.websocket);
-            client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
+            WatsonWsClient client = acquire_client();
 
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.cancel\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
 
-            await client.StopAsync();
+            release_client();
             if (logging_token != null)
             {
                 logging_token.Cancel();
@@ -414,12 +436,11 @@ namespace MachineRancher
         {
             logger.LogWarning("Estop triggered on printer " + this.name + "!");
             Random rand = new Random();
-            WatsonWsClient client = new WatsonWsClient(this.websocket);
-            client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
+            WatsonWsClient client = acquire_client();
 
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.emergency_stop\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
 
-            await client.StopAsync();
+            release_client();
             if (logging_token != null)
             {
                 logging_token.Cancel();
@@ -446,25 +467,25 @@ namespace MachineRancher
 
         private async Task<PrintRequirements> GetPrintRequirements(string filename)
         {
-            WatsonWsClient client = new WatsonWsClient(this.websocket);
-            client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
+            WatsonWsClient client = acquire_client();
             Random rand = new Random();
             int request_id = rand.Next(0, 9999);
             bool response_received = false;
             PrintRequirements new_reqs = new();
-            client.MessageReceived += (sender, message) =>
-            {
-                string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
-                if (msg.Contains("\"id\": " + request_id.ToString()))
-                {
-                    logger.LogInformation(msg);
-                    new_reqs = JsonSerializer.Deserialize<PrintRequirements>(
-                        JsonSerializer.Deserialize<Dictionary<string, object>>(msg)["result"].ToString()
-                        );
+            EventHandler<MessageReceivedEventArgs> message_handler = (sender, message) =>
+                        {
+                            string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
+                            if (msg.Contains("\"id\": " + request_id.ToString()))
+                            {
+                                logger.LogInformation(msg);
+                                new_reqs = JsonSerializer.Deserialize<PrintRequirements>(
+                                    JsonSerializer.Deserialize<Dictionary<string, object>>(msg)["result"].ToString()
+                                    );
 
-                    response_received = true;
-                }
-            };
+                                response_received = true;
+                            }
+                        };
+            client.MessageReceived += message_handler;
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"server.files.metascan\", \"params\" : { \"filename\": \"" + filename + "\"}, \"id\": " + request_id.ToString() + "}");
 
             var tokenSource = new CancellationTokenSource();
@@ -484,7 +505,8 @@ namespace MachineRancher
                 logger.LogWarning("Print requirements retrieval timed out!");
             }
 
-            await client.StopAsync();
+            client.MessageReceived -= message_handler;
+            release_client();
             
             return new_reqs;
         }
@@ -544,8 +566,7 @@ namespace MachineRancher
             if (result.Item1)
             {
                 Random rand = new Random();
-                WatsonWsClient client = new WatsonWsClient(this.websocket);
-                client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
+                WatsonWsClient client = acquire_client();
 
                 await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.start\",\"params\": { \"filename\": \"" + filename + "\"}, \"id\": " + rand.Next(0, 9999).ToString() + "}");
                 this.printer_state = PrinterState.Printing;
@@ -563,8 +584,8 @@ namespace MachineRancher
                     isHeated = !(Bed_Temperature < digitaltwin.Current_Filament.Bed_Temp || Extruder_Temperature < digitaltwin.Current_Filament.Printing_Temp);
                     Task.Run(async () => await log_machine(logging_token.Token, current_logfile));
                 }
-                
-                await client.StopAsync();
+
+                release_client();
             }
 
             return result;
