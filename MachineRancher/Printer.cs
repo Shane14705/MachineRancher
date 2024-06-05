@@ -105,6 +105,35 @@ namespace MachineRancher
         [MonitorRegistration("Printers/*/klipper/state/print_stats/state", "value")]
         public string Printer_State { get => printer_state.ToString(); set => printer_state = (PrinterState) Enum.Parse(typeof(PrinterState), (char.ToUpper(value[0]) + value.Substring(1))); }
 
+        [MonitorRegistration("Printers/*/klipper/state/print_stats/info", "value")]
+        public string Layer_Info
+        {
+            set
+            {
+                var temp = JsonSerializer.Deserialize<Dictionary<string, object>>(value);
+
+                if (temp["total_layer"] != null)
+                {
+                    current_layer = (int) temp["total_layer"];
+                }
+                else
+                {
+                    current_layer = -1;
+                }
+                
+                if (temp["current_layer"] != null)
+                {
+                    total_layers = (int) temp["current_layer"];
+                }
+                else
+                {
+                    total_layers = -1;
+                }
+            }
+        }
+
+        private int current_layer;
+        private int total_layers;
         
 
         public PrinterState printer_state;
@@ -632,18 +661,36 @@ namespace MachineRancher
                 //log.WriteLine("TIME,BED TEMP,EXTRUDER TEMP,FAN SPEED");
                 while (!token.IsCancellationRequested && this.printer_state == PrinterState.Printing)
                 {
-                    log.WriteLine(DateTime.Now.ToString("MM_dd_yyyy_HH_mm_ss") + "," + this.Bed_Temperature + "," + this.Extruder_Temperature + "," + this.Fan_Speed);
+                    log.WriteLine(DateTime.Now.ToString("MM_dd_yyyy_HH_mm_ss") + "," + this.Bed_Temperature + "," + this.Extruder_Temperature + "," + this.Fan_Speed + "," + this.current_layer);
 
-                    //TODO: Add support for First Layer Temp which is different from printing temp
-                    if (!isHeated && (this.Extruder_Temperature >= digitaltwin.Current_Filament.Printing_Temp) && (this.Bed_Temperature >= digitaltwin.Current_Filament.Bed_Temp))
+                    if (!isHeated && (this.Extruder_Temperature >= digitaltwin.Current_Filament.First_Layer_Temp) && (this.Bed_Temperature >= digitaltwin.Current_Filament.Bed_Temp))
                     {
                         isHeated = true;
                     }
 
                     if (isHeated)
                     {
+                        float target_temp;
+                        int allowable_fluctuation = int.Parse(this.config["TemperatureNominalFluctuationDegrees"]);
+                        if (this.current_layer >= 0 && this.current_layer < 1)
+                        {
+                            target_temp = digitaltwin.Current_Filament.First_Layer_Temp;
+                            allowable_fluctuation = int.Parse(this.config["TemperatureNominalFluctuationDegrees"]);
+                        }
+                        //Weird workaround to allow time during the second layer to transition between the first layer temp and the normal printing temp without setting off failure detection
+                        else if (this.current_layer >= 0 && this.current_layer == 2)
+                        {
+                            target_temp = digitaltwin.Current_Filament.Printing_Temp;
+                            allowable_fluctuation += (int)Math.Abs(digitaltwin.Current_Filament.First_Layer_Temp - digitaltwin.Current_Filament.Printing_Temp);
+                        }
+                        else
+                        {
+                            target_temp = digitaltwin.Current_Filament.Printing_Temp;
+                            allowable_fluctuation = int.Parse(this.config["TemperatureNominalFluctuationDegrees"]);
+                        }
+
                         if ((Math.Abs(digitaltwin.Current_Filament.Bed_Temp - this.Bed_Temperature) > int.Parse(this.config["TemperatureNominalFluctuationDegrees"])) ||
-                            (Math.Abs(digitaltwin.Current_Filament.Printing_Temp - this.Extruder_Temperature) > int.Parse(this.config["TemperatureNominalFluctuationDegrees"])))
+                            (Math.Abs(target_temp - this.Extruder_Temperature) > allowable_fluctuation))
                         {
                             //ERROR DETECTED, WE KNOW PRINTER MUST NOT BE PAUSED SINCE WE DONT LOG DURING PAUSE. SO WE PAUSE PRINT AND ALERT USER
                             await Toggle_Printing();
@@ -669,10 +716,11 @@ namespace MachineRancher
                 {
                     var temp = row.Split(',');
                     List<float> new_row = new List<float>();
-                    foreach ( var column in temp )
+                    //foreach ( var column in temp )
+                    for (int i = 1; i < temp.Length-1; i++)
                     {
                         float output;
-                        if (float.TryParse(column, out output))
+                        if (float.TryParse(temp[i], out output))
                         {
                             new_row.Add(output);
                         }
