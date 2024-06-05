@@ -428,7 +428,39 @@ namespace MachineRancher
             {
                 logging_token.Cancel();
                 logging_token = null;
+                if (current_logfile != String.Empty)
+                {
+                    using (StreamWriter log = File.AppendText(Path.Combine(this.config["LogFolderPath"], current_logfile)))
+                    {
+                        log.WriteLine("PRINT CANCELLED BY USER!");
+                    }
+                }
                 current_logfile = String.Empty;
+            }
+        }
+
+        public async Task Cancel_Print(string reason)
+        {
+            Random rand = new Random();
+            WatsonWsClient client = acquire_client();
+
+            await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.cancel\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
+
+            release_client();
+            if (logging_token != null)
+            {
+
+                logging_token.Cancel();
+                logging_token = null;
+                if (current_logfile != String.Empty)
+                {
+                    using (StreamWriter log = File.AppendText(Path.Combine(this.config["LogFolderPath"], current_logfile)))
+                    {
+                        log.WriteLine("FAILURE CONFIRMED! USER CLASSIFICATION=" + reason);
+                    }
+                }
+                current_logfile = String.Empty;
+                
             }
         }
 
