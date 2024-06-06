@@ -558,7 +558,7 @@ namespace MachineRancher
                 }
                 vis_command += (String.Join(',', current_frame) + "~");
             }
-            vis_command.TrimEnd('~');
+            vis_command = vis_command.TrimEnd('~');
 
             await SendNotification("Failure Detected!", "A possible failure has been detected at " + failed_machne.Name + " so the print has been paused and a visualization of recent data has been posted. Please investigate.");
 

@@ -89,14 +89,14 @@ namespace MachineRancher
         [MonitorRegistration("Printers/*/moonraker/status/connections", "websocket")]
         public string Websocket
         {
-            //get
-            //{
+            get
+            {
 
-            //    return websocket.Host.ToString() + ":" + websocket.Port.ToString();
-            //}
+                return printer_uri.Host.ToString() + ":" + printer_uri.Port.ToString();
+            }
             set
             {
-                _websocket_client = new WatsonWsClient(new Uri("ws://" + value + "/websocket"));
+                printer_uri = new Uri("ws://" + value + "/websocket");
             }
         }
 
@@ -110,34 +110,34 @@ namespace MachineRancher
         {
             set
             {
-                var temp = JsonSerializer.Deserialize<Dictionary<string, object>>(value);
+                var temp = JsonSerializer.Deserialize<Dictionary<string, int?>>(value);
 
                 if (temp["total_layer"] != null)
                 {
-                    current_layer = (int) temp["total_layer"];
-                }
-                else
-                {
-                    current_layer = -1;
-                }
-                
-                if (temp["current_layer"] != null)
-                {
-                    total_layers = (int) temp["current_layer"];
+                    total_layers = temp["total_layer"];
                 }
                 else
                 {
                     total_layers = -1;
                 }
+                
+                if (temp["current_layer"] != null)
+                {
+                    current_layer = temp["current_layer"];
+                }
+                else
+                {
+                    current_layer = -1;
+                }
             }
         }
 
-        private int current_layer;
-        private int total_layers;
+        private int? current_layer = -1;
+        private int? total_layers = -1;
         
 
         public PrinterState printer_state;
-
+        private Uri printer_uri;
         private WatsonWsClient _websocket_client = null;
 
         private CountdownEvent socket_access_lock = new CountdownEvent(0);
@@ -146,8 +146,17 @@ namespace MachineRancher
         {
             if (socket_access_lock.IsSet)
             {
-                socket_access_lock.AddCount();
-                _websocket_client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
+
+                socket_access_lock.Reset(1);
+                _websocket_client = new WatsonWsClient(printer_uri);
+                if (!_websocket_client.StartWithTimeout(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])))
+                {
+                    logger.LogCritical("Unable to connect to printer websocket at " + printer_uri.ToString());
+                }
+                else
+                {
+                    logger.LogInformation("Printer socket connected!");
+                }
             }
             else
             {
@@ -159,11 +168,13 @@ namespace MachineRancher
         {
             if (socket_access_lock.Signal())
             {
+                logger.LogInformation("Closing printer socket");
                 _websocket_client.Stop();
                 return true;
             }
             else
             {
+                logger.LogInformation("Printer socket still in use, not closing");
                 return false;
             }
         }
@@ -256,12 +267,15 @@ namespace MachineRancher
             bool response_received = false;
             EventHandler<MessageReceivedEventArgs> message_handler = (sender, message) =>
                         {
-                            string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
-                            if (msg.Contains("\"id\": " + request_id.ToString()))
+                            if (message.Data != null)
                             {
-                                deserialize_digitaltwin(msg);
+                                string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
+                                if (msg.Contains("\"id\": " + request_id.ToString()))
+                                {
+                                    deserialize_digitaltwin(msg);
 
-                                response_received = true;
+                                    response_received = true;
+                                }
                             }
                         };
             client.MessageReceived += message_handler;
@@ -334,15 +348,19 @@ namespace MachineRancher
             int request_id = rand.Next(0, 9999);
             EventHandler<MessageReceivedEventArgs> message_handler = (sender, message) =>
                         {
-                            string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
-                            if (msg.Contains("\"id\": " + request_id.ToString()))
+                            if (message.Data != null)
                             {
-                                foreach (Match match in regex.Matches(msg))
+                                string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
+                                if (msg.Contains("\"id\": " + request_id.ToString()))
                                 {
-                                    ret.Add(match.Groups[0].Value.Split(": \"")[1]);
+                                    foreach (Match match in regex.Matches(msg))
+                                    {
+                                        ret.Add(match.Groups[0].Value.Split(": \"")[1]);
+                                    }
+                                    response_received = true;
                                 }
-                                response_received = true;
                             }
+                            
                         };
             client.MessageReceived += message_handler;
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"server.files.list\",\"params\": { \"root\": \"" + "gcodes" + "\"}, \"id\": " + request_id.ToString() + "}");
@@ -416,7 +434,7 @@ namespace MachineRancher
                 
 
             //client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
-            //logger.LogInformation("Connected to " + this.name + "!");
+            logger.LogInformation("Connected to " + this.name + "!");
 
             await Send_Command(client, "G28");
             await Send_Command(client, "SCREWS_TILT_CALCULATE");
@@ -535,16 +553,20 @@ namespace MachineRancher
             PrintRequirements new_reqs = new();
             EventHandler<MessageReceivedEventArgs> message_handler = (sender, message) =>
                         {
-                            string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
-                            if (msg.Contains("\"id\": " + request_id.ToString()))
+                            if (message.Data != null)
                             {
-                                logger.LogInformation(msg);
-                                new_reqs = JsonSerializer.Deserialize<PrintRequirements>(
-                                    JsonSerializer.Deserialize<Dictionary<string, object>>(msg)["result"].ToString()
-                                    );
+                                string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
+                                if (msg.Contains("\"id\": " + request_id.ToString()))
+                                {
+                                    logger.LogInformation(msg);
+                                    new_reqs = JsonSerializer.Deserialize<PrintRequirements>(
+                                        JsonSerializer.Deserialize<Dictionary<string, object>>(msg)["result"].ToString()
+                                        );
 
-                                response_received = true;
+                                    response_received = true;
+                                }
                             }
+                            
                         };
             client.MessageReceived += message_handler;
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"server.files.metascan\", \"params\" : { \"filename\": \"" + filename + "\"}, \"id\": " + request_id.ToString() + "}");
@@ -672,16 +694,16 @@ namespace MachineRancher
                     {
                         float target_temp;
                         int allowable_fluctuation = int.Parse(this.config["TemperatureNominalFluctuationDegrees"]);
-                        if (this.current_layer >= 0 && this.current_layer < 1)
+                        if (this.current_layer == 0)
                         {
                             target_temp = digitaltwin.Current_Filament.First_Layer_Temp;
                             allowable_fluctuation = int.Parse(this.config["TemperatureNominalFluctuationDegrees"]);
                         }
                         //Weird workaround to allow time during the second layer to transition between the first layer temp and the normal printing temp without setting off failure detection
-                        else if (this.current_layer >= 0 && this.current_layer == 2)
+                        else if (this.current_layer == 1)
                         {
                             target_temp = digitaltwin.Current_Filament.Printing_Temp;
-                            allowable_fluctuation += (int)Math.Abs(digitaltwin.Current_Filament.First_Layer_Temp - digitaltwin.Current_Filament.Printing_Temp);
+                            allowable_fluctuation = int.Parse(this.config["TemperatureNominalFluctuationDegrees"]) + ((int)Math.Abs(digitaltwin.Current_Filament.First_Layer_Temp - digitaltwin.Current_Filament.Printing_Temp));
                         }
                         else
                         {
@@ -692,6 +714,7 @@ namespace MachineRancher
                         if ((Math.Abs(digitaltwin.Current_Filament.Bed_Temp - this.Bed_Temperature) > int.Parse(this.config["TemperatureNominalFluctuationDegrees"])) ||
                             (Math.Abs(target_temp - this.Extruder_Temperature) > allowable_fluctuation))
                         {
+                            logger.LogInformation("Temperature Failure detected!\n Filament bed temp: {0} vs Current bed temp {1}\nTarget Extruder temp: {2} vs Current Extruder Temp: {3}", digitaltwin.Current_Filament.Bed_Temp.ToString(), this.Bed_Temperature, target_temp.ToString(), this.Extruder_Temperature);
                             //ERROR DETECTED, WE KNOW PRINTER MUST NOT BE PAUSED SINCE WE DONT LOG DURING PAUSE. SO WE PAUSE PRINT AND ALERT USER
                             await Toggle_Printing();
                             failureDetected = true;
