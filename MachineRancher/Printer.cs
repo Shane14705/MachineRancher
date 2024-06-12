@@ -201,7 +201,7 @@ namespace MachineRancher
             Random rand = new Random();
             int request_id = rand.Next(0, 9999);
         
-            await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.printer_state.set\", \"params\": \"" + json + "\", \"id\": " + request_id.ToString() + "}");
+            await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.printer_state.set\", \"params\": " + json + ", \"id\": " + request_id.ToString() + "}");
 
             release_client();
         }
@@ -219,6 +219,7 @@ namespace MachineRancher
             switch (printer_state)
             {
                 case PrinterState.Printing:
+                    //If we are still logging, stop so that we dont log useless readings during a pause
                     if (logging_token != null)
                     {
                         logging_token.Cancel();
@@ -229,12 +230,13 @@ namespace MachineRancher
                     break;
 
                 case PrinterState.Paused:
+                    //If we are still logging while paused (shouldn't be the case), cancel it so we can start new log
                     if (logging_token != null)
                     {
                         logging_token.Cancel();
                         logging_token = null;
                     }
-                    
+
                     if (current_logfile != null)
                     {
                         logging_token = new CancellationTokenSource();
@@ -376,6 +378,7 @@ namespace MachineRancher
                 }
             }), tokenSource.Token);
 
+            //TODO: ADD A WAY FOR INTERFACES TO BE NOTIFIED OF TIMEOUTS LIKE THIS TO ENABLE FEATURES LIKE REFRESHING
             if (waitTask != await Task.WhenAny(waitTask, Task.Delay(int.Parse(this.config["RetrieveAvailablePrintsTimeout"]))))
             {
                 tokenSource.Cancel();
@@ -471,19 +474,21 @@ namespace MachineRancher
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.cancel\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
 
             release_client();
+            //If we are still logging, cancel logging loop
             if (logging_token != null)
             {
                 logging_token.Cancel();
                 logging_token = null;
-                if (current_logfile != String.Empty)
-                {
-                    using (StreamWriter log = File.AppendText(Path.Combine(this.config["LogFolderPath"], current_logfile)))
-                    {
-                        log.WriteLine("PRINT CANCELLED BY USER!");
-                    }
-                }
-                current_logfile = String.Empty;
             }
+
+            if (current_logfile != String.Empty)
+            {
+                using (StreamWriter log = File.AppendText(Path.Combine(this.config["LogFolderPath"], current_logfile)))
+                {
+                    log.WriteLine("PRINT CANCELLED BY USER!");
+                }
+            }
+            current_logfile = String.Empty;
         }
 
         public async Task Cancel_Print(string reason)
@@ -494,21 +499,21 @@ namespace MachineRancher
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.cancel\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
 
             release_client();
+            //If we are still logging, cancel logging loop
             if (logging_token != null)
             {
-
                 logging_token.Cancel();
                 logging_token = null;
-                if (current_logfile != String.Empty)
-                {
-                    using (StreamWriter log = File.AppendText(Path.Combine(this.config["LogFolderPath"], current_logfile)))
-                    {
-                        log.WriteLine("FAILURE CONFIRMED! USER CLASSIFICATION=" + reason);
-                    }
-                }
-                current_logfile = String.Empty;
-                
             }
+            logger.LogInformation("Cancelling with reason " + reason + ". Current logfile: " + Path.Combine(this.config["LogFolderPath"], current_logfile));
+            if (current_logfile != String.Empty)
+            {
+                using (StreamWriter log = File.AppendText(Path.Combine(this.config["LogFolderPath"], current_logfile)))
+                {
+                    log.WriteLine("FAILURE CONFIRMED! USER CLASSIFICATION=" + reason);
+                }
+            }
+            current_logfile = String.Empty;
         }
 
         public async Task EStop()
@@ -520,12 +525,13 @@ namespace MachineRancher
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.emergency_stop\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
 
             release_client();
+            //If we are still logging, cancel logging loop
             if (logging_token != null)
             {
                 logging_token.Cancel();
                 logging_token = null;
-                current_logfile = String.Empty;
             }
+            current_logfile = String.Empty;
         }
 
         struct PrintRequirements
