@@ -111,7 +111,6 @@ namespace MachineRancher
             {
                 endpoints.Add("http://" + listen_section["ListenServerIP"] + ":" + listen_port + "/" + interface_type.Key + "/");
             }
-            ;
             this.listen_server = new WatsonWsServer(endpoints);
 
             this.listen_server.ClientConnected += OnClientConnect;

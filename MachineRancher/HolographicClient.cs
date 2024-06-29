@@ -264,7 +264,7 @@ namespace MachineRancher
                                                 break;
 
                                             default:
-                                                await send_client("No implementation of get_stats for this machine type");
+                                                await send_client("No implementation of login/advance/reverse for this machine type");
                                                 break;
 
                                         }
