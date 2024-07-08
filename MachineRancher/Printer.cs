@@ -734,32 +734,39 @@ namespace MachineRancher
 
             if (failureDetected)
             {
-                var samples_to_average = File.ReadLines(Path.Combine(this.config["LogFolderPath"], filename)).TakeLast(
-                    (int) Math.Floor(
-                        (int.Parse(this.config["SampleMinutesOnFailure"]) * (60000 / (float.Parse(this.config["LoggingFrequency"]))))
-                    )
-                );
-
-                List<List<float>> rows = new List<List<float>>();
-                foreach ( var row in samples_to_average )
-                {
-                    var temp = row.Split(',');
-                    List<float> new_row = new List<float>();
-                    //foreach ( var column in temp )
-                    for (int i = 1; i < temp.Length-1; i++)
-                    {
-                        float output;
-                        if (float.TryParse(temp[i], out output))
-                        {
-                            new_row.Add(output);
-                        }
-                    }
-                    rows.Add(new_row);
-                }
+                List<List<float>> rows = generateVisData(filename);
 
                 onPrintFailureDetected?.Invoke(this, rows);
             }
         }
-            
+        
+        //TODO: Update this to parameterize the file to grab data from as well as the samples per minute, error checking, etc
+        public List<List<float>> generateVisData(string filename)
+        {
+            var samples_to_average = File.ReadLines(Path.Combine(this.config["LogFolderPath"], filename)).TakeLast(
+                    (int)Math.Floor(
+                        (int.Parse(this.config["SampleMinutesOnFailure"]) * (60000 / (float.Parse(this.config["LoggingFrequency"]))))
+                    )
+                );
+
+            List<List<float>> rows = new List<List<float>>();
+            foreach (var row in samples_to_average)
+            {
+                var temp = row.Split(',');
+                List<float> new_row = new List<float>();
+                //foreach ( var column in temp )
+                for (int i = 1; i < temp.Length - 1; i++)
+                {
+                    float output;
+                    if (float.TryParse(temp[i], out output))
+                    {
+                        new_row.Add(output);
+                    }
+                }
+                rows.Add(new_row);
+            }
+
+            return rows;
+        }
     }
 }
