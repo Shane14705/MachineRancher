@@ -382,7 +382,16 @@ namespace MachineRancher
                                                     }
                                                     else
                                                     {
-                                                        await printer.Cancel_Print();
+                                                        //Instead of await printer.Cancel_Print();
+                                                        //We need to toggle the print and send a vis graph to require the user to give a "reason" before cancelling
+                                                        await printer.Toggle_Printing();
+                                                        onPrinterFailureDetected(printer, printer.generateVisData());
+                                                        //TODO: Need a way to flush the log anytime data is visualized
+                                                        //TODO: Also need to handle case where print is paused then resumed,im pretty sure this breaks logging
+
+
+                                                        logger.LogInformation("Attempted cancel without reason on printer " + printer.Name + ", sending vis data to request a cancellation WITH reason.");
+                                                        //printer.onPrintFailureDetected?.Invoke(printer, printer.generateVisData());
                                                     }
                                                     
                                                     await send_client("stat_update~" + printer.Name + "~" + printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed + "~" + printer.Printer_State);

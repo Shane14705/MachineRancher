@@ -689,6 +689,7 @@ namespace MachineRancher
                 //log.WriteLine("TIME,BED TEMP,EXTRUDER TEMP,FAN SPEED");
                 while (!token.IsCancellationRequested && this.printer_state == PrinterState.Printing)
                 {
+                 
                     log.WriteLine(DateTime.Now.ToString("MM_dd_yyyy_HH_mm_ss") + "," + this.Bed_Temperature + "," + this.Extruder_Temperature + "," + this.Fan_Speed + "," + this.current_layer);
 
                     if (!isHeated && (this.Extruder_Temperature >= digitaltwin.Current_Filament.First_Layer_Temp) && (this.Bed_Temperature >= digitaltwin.Current_Filament.Bed_Temp))
@@ -724,26 +725,30 @@ namespace MachineRancher
                             //ERROR DETECTED, WE KNOW PRINTER MUST NOT BE PAUSED SINCE WE DONT LOG DURING PAUSE. SO WE PAUSE PRINT AND ALERT USER
                             await Toggle_Printing();
                             failureDetected = true;
-                            await log.FlushAsync();
+                            
                             break;
                         }
                     }
                     await Task.Delay(int.Parse(this.config["LoggingFrequency"]), token);
                 }
+
+                await log.FlushAsync();
+                logger.LogInformation("Stopping logging!");
+
             }
 
             if (failureDetected)
             {
-                List<List<float>> rows = generateVisData(filename);
+                List<List<float>> rows = generateVisData();
 
                 onPrintFailureDetected?.Invoke(this, rows);
             }
         }
         
-        //TODO: Update this to parameterize the file to grab data from as well as the samples per minute, error checking, etc
-        public List<List<float>> generateVisData(string filename)
+        //TODO: Update this to parameterize the file to grab data from as well as the samples per minute, error checking if current logfile has issue or doesnt exist, etc
+        public List<List<float>> generateVisData()
         {
-            var samples_to_average = File.ReadLines(Path.Combine(this.config["LogFolderPath"], filename)).TakeLast(
+            var samples_to_average = File.ReadLines(Path.Combine(this.config["LogFolderPath"], current_logfile)).TakeLast(
                     (int)Math.Floor(
                         (int.Parse(this.config["SampleMinutesOnFailure"]) * (60000 / (float.Parse(this.config["LoggingFrequency"]))))
                     )
