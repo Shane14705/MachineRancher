@@ -385,6 +385,7 @@ namespace MachineRancher
                                                         //Instead of await printer.Cancel_Print();
                                                         //We need to toggle the print and send a vis graph to require the user to give a "reason" before cancelling
                                                         await printer.Toggle_Printing();
+                                                        printer.CancelLogging();
                                                         onPrinterFailureDetected(printer, printer.generateVisData());
                                                         //TODO: Need a way to flush the log anytime data is visualized
                                                         //TODO: Also need to handle case where print is paused then resumed,im pretty sure this breaks logging

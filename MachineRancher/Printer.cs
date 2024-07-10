@@ -680,6 +680,11 @@ namespace MachineRancher
             return result;
         }
 
+        public void CancelLogging ()
+        {
+            logging_token?.Cancel();
+        }
+
         private async Task log_machine(CancellationToken token, string filename)
         {
             await refresh_digitaltwin();
