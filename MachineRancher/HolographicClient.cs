@@ -264,7 +264,7 @@ namespace MachineRancher
                                                 break;
 
                                             default:
-                                                await send_client("No implementation of get_stats for this machine type");
+                                                await send_client("No implementation of login/advance/reverse for this machine type");
                                                 break;
 
                                         }
@@ -376,7 +376,15 @@ namespace MachineRancher
 
                                                 Task.Run(async () =>
                                                 {
-                                                    await printer.Cancel_Print();
+                                                    if (args[2] != null)
+                                                    {
+                                                        await printer.Cancel_Print(args[2]);
+                                                    }
+                                                    else
+                                                    {
+                                                        await printer.Cancel_Print();
+                                                    }
+                                                    
                                                     await send_client("stat_update~" + printer.Name + "~" + printer.Bed_Temperature.ToString() + "~" + printer.Extruder_Temperature.ToString() + "~" + printer.Fan_Speed + "~" + printer.Printer_State);
                                                 });
                                                 break;
@@ -533,7 +541,6 @@ namespace MachineRancher
             }
         }
 
-        //TODO: IMPLEMENT THIS USING VIZ_DATA, LOG, SEND NOTIFICATION, ETC.
         private async void onPrinterFailureDetected(Printer failed_machne, List<List<float>> data)
         {
             this.send_client("stat_update~" + failed_machne.Name + "~" + failed_machne.Bed_Temperature.ToString() + "~" + failed_machne.Extruder_Temperature.ToString() + "~" + failed_machne.Fan_Speed + "~" + failed_machne.Printer_State);
@@ -551,7 +558,7 @@ namespace MachineRancher
                 }
                 vis_command += (String.Join(',', current_frame) + "~");
             }
-            vis_command.TrimEnd('~');
+            vis_command = vis_command.TrimEnd('~');
 
             await SendNotification("Failure Detected!", "A possible failure has been detected at " + failed_machne.Name + " so the print has been paused and a visualization of recent data has been posted. Please investigate.");
 

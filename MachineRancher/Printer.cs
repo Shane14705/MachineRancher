@@ -89,14 +89,14 @@ namespace MachineRancher
         [MonitorRegistration("Printers/*/moonraker/status/connections", "websocket")]
         public string Websocket
         {
-            //get
-            //{
+            get
+            {
 
-            //    return websocket.Host.ToString() + ":" + websocket.Port.ToString();
-            //}
+                return printer_uri.Host.ToString() + ":" + printer_uri.Port.ToString();
+            }
             set
             {
-                _websocket_client = new WatsonWsClient(new Uri("ws://" + value + "/websocket"));
+                printer_uri = new Uri("ws://" + value + "/websocket");
             }
         }
 
@@ -105,10 +105,39 @@ namespace MachineRancher
         [MonitorRegistration("Printers/*/klipper/state/print_stats/state", "value")]
         public string Printer_State { get => printer_state.ToString(); set => printer_state = (PrinterState) Enum.Parse(typeof(PrinterState), (char.ToUpper(value[0]) + value.Substring(1))); }
 
+        [MonitorRegistration("Printers/*/klipper/state/print_stats/info", "value")]
+        public string Layer_Info
+        {
+            set
+            {
+                var temp = JsonSerializer.Deserialize<Dictionary<string, int?>>(value);
+
+                if (temp["total_layer"] != null)
+                {
+                    total_layers = temp["total_layer"];
+                }
+                else
+                {
+                    total_layers = -1;
+                }
+                
+                if (temp["current_layer"] != null)
+                {
+                    current_layer = temp["current_layer"];
+                }
+                else
+                {
+                    current_layer = -1;
+                }
+            }
+        }
+
+        private int? current_layer = -1;
+        private int? total_layers = -1;
         
 
         public PrinterState printer_state;
-
+        private Uri printer_uri;
         private WatsonWsClient _websocket_client = null;
 
         private CountdownEvent socket_access_lock = new CountdownEvent(0);
@@ -117,8 +146,17 @@ namespace MachineRancher
         {
             if (socket_access_lock.IsSet)
             {
-                socket_access_lock.AddCount();
-                _websocket_client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
+
+                socket_access_lock.Reset(1);
+                _websocket_client = new WatsonWsClient(printer_uri);
+                if (!_websocket_client.StartWithTimeout(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])))
+                {
+                    logger.LogCritical("Unable to connect to printer websocket at " + printer_uri.ToString());
+                }
+                else
+                {
+                    logger.LogInformation("Printer socket connected!");
+                }
             }
             else
             {
@@ -130,11 +168,13 @@ namespace MachineRancher
         {
             if (socket_access_lock.Signal())
             {
+                logger.LogInformation("Closing printer socket");
                 _websocket_client.Stop();
                 return true;
             }
             else
             {
+                logger.LogInformation("Printer socket still in use, not closing");
                 return false;
             }
         }
@@ -161,7 +201,7 @@ namespace MachineRancher
             Random rand = new Random();
             int request_id = rand.Next(0, 9999);
         
-            await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.printer_state.set\", \"params\": \"" + json + "\", \"id\": " + request_id.ToString() + "}");
+            await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.printer_state.set\", \"params\": " + json + ", \"id\": " + request_id.ToString() + "}");
 
             release_client();
         }
@@ -179,6 +219,7 @@ namespace MachineRancher
             switch (printer_state)
             {
                 case PrinterState.Printing:
+                    //If we are still logging, stop so that we dont log useless readings during a pause
                     if (logging_token != null)
                     {
                         logging_token.Cancel();
@@ -189,12 +230,13 @@ namespace MachineRancher
                     break;
 
                 case PrinterState.Paused:
+                    //If we are still logging while paused (shouldn't be the case), cancel it so we can start new log
                     if (logging_token != null)
                     {
                         logging_token.Cancel();
                         logging_token = null;
                     }
-                    
+
                     if (current_logfile != null)
                     {
                         logging_token = new CancellationTokenSource();
@@ -227,12 +269,15 @@ namespace MachineRancher
             bool response_received = false;
             EventHandler<MessageReceivedEventArgs> message_handler = (sender, message) =>
                         {
-                            string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
-                            if (msg.Contains("\"id\": " + request_id.ToString()))
+                            if (message.Data != null)
                             {
-                                deserialize_digitaltwin(msg);
+                                string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
+                                if (msg.Contains("\"id\": " + request_id.ToString()))
+                                {
+                                    deserialize_digitaltwin(msg);
 
-                                response_received = true;
+                                    response_received = true;
+                                }
                             }
                         };
             client.MessageReceived += message_handler;
@@ -305,15 +350,19 @@ namespace MachineRancher
             int request_id = rand.Next(0, 9999);
             EventHandler<MessageReceivedEventArgs> message_handler = (sender, message) =>
                         {
-                            string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
-                            if (msg.Contains("\"id\": " + request_id.ToString()))
+                            if (message.Data != null)
                             {
-                                foreach (Match match in regex.Matches(msg))
+                                string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
+                                if (msg.Contains("\"id\": " + request_id.ToString()))
                                 {
-                                    ret.Add(match.Groups[0].Value.Split(": \"")[1]);
+                                    foreach (Match match in regex.Matches(msg))
+                                    {
+                                        ret.Add(match.Groups[0].Value.Split(": \"")[1]);
+                                    }
+                                    response_received = true;
                                 }
-                                response_received = true;
                             }
+                            
                         };
             client.MessageReceived += message_handler;
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"server.files.list\",\"params\": { \"root\": \"" + "gcodes" + "\"}, \"id\": " + request_id.ToString() + "}");
@@ -329,6 +378,7 @@ namespace MachineRancher
                 }
             }), tokenSource.Token);
 
+            //TODO: ADD A WAY FOR INTERFACES TO BE NOTIFIED OF TIMEOUTS LIKE THIS TO ENABLE FEATURES LIKE REFRESHING
             if (waitTask != await Task.WhenAny(waitTask, Task.Delay(int.Parse(this.config["RetrieveAvailablePrintsTimeout"]))))
             {
                 tokenSource.Cancel();
@@ -387,7 +437,7 @@ namespace MachineRancher
                 
 
             //client.StartWithTimeoutAsync(int.Parse(this.config["MoonrakerConnectionTimeoutSeconds"])).Wait();
-            //logger.LogInformation("Connected to " + this.name + "!");
+            logger.LogInformation("Connected to " + this.name + "!");
 
             await Send_Command(client, "G28");
             await Send_Command(client, "SCREWS_TILT_CALCULATE");
@@ -424,12 +474,46 @@ namespace MachineRancher
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.cancel\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
 
             release_client();
+            //If we are still logging, cancel logging loop
             if (logging_token != null)
             {
                 logging_token.Cancel();
                 logging_token = null;
-                current_logfile = String.Empty;
             }
+
+            if (current_logfile != String.Empty)
+            {
+                using (StreamWriter log = File.AppendText(Path.Combine(this.config["LogFolderPath"], current_logfile)))
+                {
+                    log.WriteLine("PRINT CANCELLED BY USER!");
+                }
+            }
+            current_logfile = String.Empty;
+        }
+
+        public async Task Cancel_Print(string reason)
+        {
+            Random rand = new Random();
+            WatsonWsClient client = acquire_client();
+
+            await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.print.cancel\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
+
+            release_client();
+            //If we are still logging, cancel logging loop
+            if (logging_token != null)
+            {
+                logging_token.Cancel();
+                logging_token = null;
+            }
+            logger.LogInformation("Cancelling with reason " + reason + ". Current logfile: " + Path.Combine(this.config["LogFolderPath"], current_logfile));
+            if (current_logfile != String.Empty)
+            {
+                using (StreamWriter log = File.AppendText(Path.Combine(this.config["LogFolderPath"], current_logfile)))
+                {
+                    log.WriteLine("FAILURE CONFIRMED! USER CLASSIFICATION=" + reason);
+                }
+            }
+            current_logfile = String.Empty;
         }
 
         public async Task EStop()
@@ -441,12 +525,13 @@ namespace MachineRancher
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"printer.emergency_stop\", \"id\": " + rand.Next(0, 9999).ToString() + "}");
 
             release_client();
+            //If we are still logging, cancel logging loop
             if (logging_token != null)
             {
                 logging_token.Cancel();
                 logging_token = null;
-                current_logfile = String.Empty;
             }
+            current_logfile = String.Empty;
         }
 
         struct PrintRequirements
@@ -474,16 +559,20 @@ namespace MachineRancher
             PrintRequirements new_reqs = new();
             EventHandler<MessageReceivedEventArgs> message_handler = (sender, message) =>
                         {
-                            string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
-                            if (msg.Contains("\"id\": " + request_id.ToString()))
+                            if (message.Data != null)
                             {
-                                logger.LogInformation(msg);
-                                new_reqs = JsonSerializer.Deserialize<PrintRequirements>(
-                                    JsonSerializer.Deserialize<Dictionary<string, object>>(msg)["result"].ToString()
-                                    );
+                                string msg = Encoding.UTF8.GetString(message.Data.Array, 0, message.Data.Count);
+                                if (msg.Contains("\"id\": " + request_id.ToString()))
+                                {
+                                    logger.LogInformation(msg);
+                                    new_reqs = JsonSerializer.Deserialize<PrintRequirements>(
+                                        JsonSerializer.Deserialize<Dictionary<string, object>>(msg)["result"].ToString()
+                                        );
 
-                                response_received = true;
+                                    response_received = true;
+                                }
                             }
+                            
                         };
             client.MessageReceived += message_handler;
             await client.SendAsync("{ \"jsonrpc\": \"2.0\", \"method\":\"server.files.metascan\", \"params\" : { \"filename\": \"" + filename + "\"}, \"id\": " + request_id.ToString() + "}");
@@ -600,19 +689,38 @@ namespace MachineRancher
                 //log.WriteLine("TIME,BED TEMP,EXTRUDER TEMP,FAN SPEED");
                 while (!token.IsCancellationRequested && this.printer_state == PrinterState.Printing)
                 {
-                    log.WriteLine(DateTime.Now.ToString("MM_dd_yyyy_HH_mm_ss") + "," + this.Bed_Temperature + "," + this.Extruder_Temperature + "," + this.Fan_Speed);
+                    log.WriteLine(DateTime.Now.ToString("MM_dd_yyyy_HH_mm_ss") + "," + this.Bed_Temperature + "," + this.Extruder_Temperature + "," + this.Fan_Speed + "," + this.current_layer);
 
-                    //TODO: Add support for First Layer Temp which is different from printing temp
-                    if (!isHeated && (this.Extruder_Temperature >= digitaltwin.Current_Filament.Printing_Temp) && (this.Bed_Temperature >= digitaltwin.Current_Filament.Bed_Temp))
+                    if (!isHeated && (this.Extruder_Temperature >= digitaltwin.Current_Filament.First_Layer_Temp) && (this.Bed_Temperature >= digitaltwin.Current_Filament.Bed_Temp))
                     {
                         isHeated = true;
                     }
 
                     if (isHeated)
                     {
-                        if ((Math.Abs(digitaltwin.Current_Filament.Bed_Temp - this.Bed_Temperature) > int.Parse(this.config["TemperatureNominalFluctuationDegrees"])) ||
-                            (Math.Abs(digitaltwin.Current_Filament.Printing_Temp - this.Extruder_Temperature) > int.Parse(this.config["TemperatureNominalFluctuationDegrees"])))
+                        float target_temp;
+                        int allowable_fluctuation = int.Parse(this.config["TemperatureNominalFluctuationDegrees"]);
+                        if (this.current_layer == 0)
                         {
+                            target_temp = digitaltwin.Current_Filament.First_Layer_Temp;
+                            allowable_fluctuation = int.Parse(this.config["TemperatureNominalFluctuationDegrees"]);
+                        }
+                        //Weird workaround to allow time during the second layer to transition between the first layer temp and the normal printing temp without setting off failure detection
+                        else if (this.current_layer == 1)
+                        {
+                            target_temp = digitaltwin.Current_Filament.Printing_Temp;
+                            allowable_fluctuation = int.Parse(this.config["TemperatureNominalFluctuationDegrees"]) + ((int)Math.Abs(digitaltwin.Current_Filament.First_Layer_Temp - digitaltwin.Current_Filament.Printing_Temp));
+                        }
+                        else
+                        {
+                            target_temp = digitaltwin.Current_Filament.Printing_Temp;
+                            allowable_fluctuation = int.Parse(this.config["TemperatureNominalFluctuationDegrees"]);
+                        }
+
+                        if ((Math.Abs(digitaltwin.Current_Filament.Bed_Temp - this.Bed_Temperature) > int.Parse(this.config["TemperatureNominalFluctuationDegrees"])) ||
+                            (Math.Abs(target_temp - this.Extruder_Temperature) > allowable_fluctuation))
+                        {
+                            logger.LogInformation("Temperature Failure detected!\n Filament bed temp: {0} vs Current bed temp {1}\nTarget Extruder temp: {2} vs Current Extruder Temp: {3}", digitaltwin.Current_Filament.Bed_Temp.ToString(), this.Bed_Temperature, target_temp.ToString(), this.Extruder_Temperature);
                             //ERROR DETECTED, WE KNOW PRINTER MUST NOT BE PAUSED SINCE WE DONT LOG DURING PAUSE. SO WE PAUSE PRINT AND ALERT USER
                             await Toggle_Printing();
                             failureDetected = true;
@@ -637,10 +745,11 @@ namespace MachineRancher
                 {
                     var temp = row.Split(',');
                     List<float> new_row = new List<float>();
-                    foreach ( var column in temp )
+                    //foreach ( var column in temp )
+                    for (int i = 1; i < temp.Length-1; i++)
                     {
                         float output;
-                        if (float.TryParse(column, out output))
+                        if (float.TryParse(temp[i], out output))
                         {
                             new_row.Add(output);
                         }
